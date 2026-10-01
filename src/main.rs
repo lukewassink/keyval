@@ -1,8 +1,12 @@
-use crate::storage::{DeleteRequest, ReadRequest, Storage, WriteRequest};
+use crate::{
+    cli::run_cli,
+    storage::{DeleteRequest, ReadRequest, Storage, WriteRequest},
+};
 
+mod cli;
 mod storage;
 
-fn main() {
+fn test() {
     let file_path = "test_db";
     let mut s = Storage::initialize(file_path).unwrap();
 
@@ -24,4 +28,8 @@ fn main() {
     println!("\n offsets: {}\n", s.print_offsets());
     println!("{:?}", s.read(&rr));
     println!("{:?}", s.read(&rr2));
+}
+
+fn main() {
+    run_cli();
 }

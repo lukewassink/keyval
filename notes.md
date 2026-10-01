@@ -14,3 +14,4 @@ Low level api:
 - `parse(&mut file) ->  StorageResponse` used by `parseOffsets` and `read`. delegates to:
   - `parsePut`
   - `parseDelete`
+- writeS
