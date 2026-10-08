@@ -1,5 +1,5 @@
 use clap::Parser;
-use easy_repl::{CommandStatus, Repl, command, repl::BuilderError};
+use easy_repl::{CommandStatus, Repl, command};
 use std::cell::RefCell;
 use storage::Storage;
 
@@ -13,7 +13,7 @@ struct Cli {
 pub fn run_cli() {
     let cli = Cli::parse();
 
-    let mut s = match Storage::initialize(&cli.path) {
+    let s = match Storage::initialize(&cli.path) {
         Ok(s) => s,
         Err(e) => {
             println!("Could not initialize database due to error: {:?}", e);

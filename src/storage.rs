@@ -1,23 +1,29 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use thiserror::Error;
 
 use crate::storage::Operation::{Delete, Put};
-use crate::storage::StorageError::{Corrupted, IOError, MissingKey};
+use crate::storage::StorageError::*;
 
+#[derive(Debug)]
 pub struct WriteRequest<'a> {
     pub key: &'a str,
     pub val: &'a str,
 }
 
+#[derive(Debug)]
 pub struct ReadRequest<'a> {
     pub key: &'a str,
 }
 
+#[derive(Debug)]
 pub struct DeleteRequest<'a> {
     pub key: &'a str,
 }
 
+#[derive(Debug)]
 pub struct ContainsRequest<'a> {
     pub key: &'a str,
 }
@@ -28,10 +34,17 @@ pub struct ReadResponse {
     pub val: String,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum StorageError {
-    IOError(std::io::Error),
+    #[error("UTF8 error: {0}")]
+    InvalidUTTF8(#[from] std::string::FromUtf8Error),
+    #[error("IO error: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("Key {0} not found.")]
     MissingKey(String),
+    #[error("Operation code {0} does not exist.")]
+    InvalidOpCode(u8),
+    #[error("{0}")]
     Corrupted(String),
 }
 
@@ -53,14 +66,12 @@ impl Operation {
         match code {
             0 => Ok(Put),
             1 => Ok(Delete),
-            _ => Err(Corrupted(format!(
-                "Invalid code {} does not match any operation.",
-                code
-            ))),
+            _ => Err(InvalidOpCode(code)),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct Storage {
     file_path: String,
     file: File,
@@ -95,13 +106,13 @@ fn pack_delete(request: &DeleteRequest) -> Vec<u8> {
 
 fn parse_op(reader: &mut impl Read) -> Result<Operation, StorageError> {
     let buf: &mut [u8] = &mut [0; 1];
-    reader.read_exact(buf).map_err(IOError)?;
+    reader.read_exact(buf)?;
     Operation::decode(buf[0])
 }
 
 fn parse_long(reader: &mut impl Read) -> Result<u64, StorageError> {
     let buf: &mut [u8] = &mut [0; 8];
-    reader.read_exact(buf).map_err(IOError)?;
+    reader.read_exact(buf)?;
     let len: [u8; 8] = buf.try_into().unwrap();
     Ok(u64::from_be_bytes(len))
 }
@@ -111,12 +122,11 @@ fn parse_string(reader: &mut impl Read, len: u64) -> Result<String, StorageError
     // to avoid silent truncation.
     let len = len as usize;
     let mut buf: Vec<u8> = vec![0; len];
-    reader.read_exact(&mut buf).map_err(IOError)?;
+    reader.read_exact(&mut buf)?;
 
     // Once checksums are implmented, consider doing an unchecked conversion
     // so we don't have to pay to check for valid utf8.
-    String::from_utf8(buf)
-        .map_err(|e| Corrupted(format!("Could not parse string as valid UTF8: {}", e)))
+    Ok(String::from_utf8(buf)?)
 }
 
 impl Storage {
@@ -132,7 +142,7 @@ impl Storage {
         let mut offsets = HashMap::new();
         let mut offset = 0;
 
-        reader.rewind().map_err(IOError)?;
+        reader.rewind()?;
         while offset < file_length {
             let op = parse_op(reader)?;
 
@@ -145,9 +155,7 @@ impl Storage {
 
                     offsets.insert(key, offset);
                     offset += key_len + val_len + 17;
-                    reader
-                        .seek(std::io::SeekFrom::Start(offset))
-                        .map_err(IOError)?;
+                    reader.seek(std::io::SeekFrom::Start(offset))?;
                 }
                 Delete => {
                     let key_len = parse_long(reader)?;
@@ -168,10 +176,9 @@ impl Storage {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(file_path)
-            .map_err(IOError)?;
+            .open(file_path)?;
 
-        let length = file.metadata().map_err(IOError)?.len();
+        let length = file.metadata()?.len();
         let (offsets, next_offset) = Storage::parse_offsets(&mut file, length)?;
 
         Ok(Storage {
@@ -210,11 +217,11 @@ impl Storage {
     pub fn read(&mut self, request: &ReadRequest) -> Result<ReadResponse, StorageError> {
         let offset = self.offsets.get(request.key);
         if let Some(offset) = offset {
-            self.file.seek(SeekFrom::Start(*offset)).map_err(IOError)?;
+            self.file.seek(SeekFrom::Start(*offset))?;
             let op = parse_op(&mut self.file)?;
             if op != Put {
                 return Err(Corrupted(format!(
-                    "Offset at key {} does not correspond to a Put operation.",
+                    "Can not read. Offset at key {} does not correspond to a Put operation.",
                     request.key
                 )));
             }
@@ -227,7 +234,7 @@ impl Storage {
 
             Ok(ReadResponse { key, val })
         } else {
-            Err(MissingKey(format!("Key not present: {}", request.key)))
+            Err(MissingKey(request.key.into()))
         }
     }
 

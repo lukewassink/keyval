@@ -4,7 +4,7 @@ use crate::{
     GetRequest, GetResponse,
     Operation::{self, Contains, Delete, Get, Put},
     PutRequest, PutResponse,
-    Status::{self, Failure, NotFound, Success},
+    Status::{self, InternalError, InvalidRequest, KeyNotFound, Success},
 };
 
 impl Operation {
@@ -22,8 +22,9 @@ impl Status {
     pub fn encode(&self) -> u8 {
         match self {
             Success => 0,
-            Failure => 1,
-            NotFound => 2,
+            InternalError => 1,
+            InvalidRequest => 2,
+            KeyNotFound => 3,
         }
     }
 }
