@@ -9,7 +9,7 @@ use std::io::Write;
 use std::net::TcpListener;
 use thiserror::*;
 
-use crate::storage::{ReadRequest, ReadResponse, Storage, StorageError, WriteRequest};
+use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
 
 #[derive(Error, Debug)]
 pub enum TCPLayerError {
@@ -27,7 +27,13 @@ pub fn create_listener(socket_addr: String) -> std::io::Result<TcpListener> {
     TcpListener::bind(socket_addr)
 }
 
-pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<(), StorageError> {
+pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<(), TCPLayerError> {
+    let Ok(local_address) = listener.local_addr() else {
+        println!("Could not access local address.");
+        return Ok(());
+    };
+    println!("Listening on {}...\n", local_address);
+
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else {
             break;
@@ -62,12 +68,8 @@ pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<()
                         Ok(_) => println!("Put from {}", address),
                         Err(e) => println!("Error in put from {}, {}", address, e),
                     },
-                    Ok(Delete) => {
-                        let _ = handle_delete_request(&mut stream, &mut storage);
-                    }
-                    Ok(Contains) => {
-                        let _ = handle_contains_request(&mut stream, &mut storage);
-                    }
+                    Ok(Delete) => handle_delete_request(&mut stream, &mut storage)?,
+                    Ok(Contains) => handle_contains_request(&mut stream, &mut storage)?,
                     // Rather than dropping invalid requests silently, consider an
                     // InvalidRequestResponse message.
                     Err(_) => {}
