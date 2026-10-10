@@ -39,37 +39,63 @@ pub enum Status {
     KeyNotFound,
 }
 
+#[derive(Debug)]
 pub struct GetRequest {
     pub key: String,
 }
 
+#[derive(Debug)]
 pub struct GetResponse {
     pub status: Status,
     pub val: String,
 }
 
+impl GetResponse {
+    pub fn failed(status: Status) -> GetResponse {
+        GetResponse {
+            status,
+            val: "".into(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PutRequest {
     pub key: String,
     pub val: String,
 }
 
+#[derive(Debug)]
 pub struct PutResponse {
     pub status: Status,
 }
 
+#[derive(Debug)]
 pub struct DeleteRequest {
     pub key: String,
 }
 
+#[derive(Debug)]
 pub struct DeleteResponse {
     pub status: Status,
 }
 
+#[derive(Debug)]
 pub struct ContainsRequest {
     pub key: String,
 }
 
+#[derive(Debug)]
 pub struct ContainsResponse {
     pub status: Status,
     pub contains: bool,
+}
+
+impl ContainsResponse {
+    pub fn failed(status: Status) -> ContainsResponse {
+        ContainsResponse {
+            status,
+            contains: false,
+        }
+    }
 }

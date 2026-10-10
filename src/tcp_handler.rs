@@ -1,44 +1,76 @@
 use protocol::Operation::{self, Contains, Delete, Get, Put};
 use protocol::Status::{InternalError, InvalidRequest, Success};
 use protocol::{
-    ContainsRequest, DecodingError, DeleteRequest, GetRequest, GetResponse, PutRequest, PutResponse,
+    ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
+    PutRequest, PutResponse,
 };
 use std::io::Read;
 use std::io::Write;
-use std::io::prelude::*;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
+use thiserror::*;
 
-use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
+use crate::storage::{ReadRequest, ReadResponse, Storage, StorageError, WriteRequest};
 
-pub struct TCPConfig {
-    socket_addr: SocketAddr,
+#[derive(Error, Debug)]
+pub enum TCPLayerError {
+    #[error("{0}")]
+    Database(#[from] crate::storage::StorageError),
+    #[error("Error decoding request: {0}")]
+    Request(#[from] protocol::DecodingError),
+    #[error("Error encoding response: {0}")]
+    Response(#[from] protocol::EncodingError),
+    #[error("TCP stream error: {0}")]
+    TCPStream(#[from] std::io::Error),
 }
 
-pub fn create_listener(config: TCPConfig) -> std::io::Result<TcpListener> {
-    TcpListener::bind(config.socket_addr)
+pub fn create_listener(socket_addr: String) -> std::io::Result<TcpListener> {
+    TcpListener::bind(socket_addr)
 }
 
-pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> std::io::Result<()> {
+pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<(), StorageError> {
     for stream in listener.incoming() {
-        let mut stream = stream?;
+        let Ok(mut stream) = stream else {
+            break;
+        };
+
+        let Ok(address) = stream.peer_addr() else {
+            break;
+        };
+        println!("Connected to {:?}", address);
+
         loop {
             let mut op_buf: [u8; 1] = [0; 1];
             match stream.read(&mut op_buf) {
                 Ok(0) => {
+                    println!("Connection terminated by {}", address);
                     break;
                 }
-                Err(_) => {
+                Err(e) => {
+                    println!(
+                        "Error in connection with {}, {}\nConnection terminated.",
+                        address, e
+                    );
                     break;
                 }
                 Ok(_) => match Operation::decode(op_buf[0]) {
-                    Ok(Put) => {
-                        handle_put_request(&mut stream, &mut storage);
+                    // How to handle errors here? Maybe log them in some way?
+                    Ok(Put) => match handle_put_request(&mut stream, &mut storage) {
+                        Ok(_) => println!("Put from {}", address),
+                        Err(e) => println!("Error in put from {}, {}", address, e),
+                    },
+                    Ok(Get) => match handle_get_request(&mut stream, &mut storage) {
+                        Ok(_) => println!("Put from {}", address),
+                        Err(e) => println!("Error in put from {}, {}", address, e),
+                    },
+                    Ok(Delete) => {
+                        let _ = handle_delete_request(&mut stream, &mut storage);
                     }
-                    Ok(Get) => {}
-                    Ok(Delete) => {}
-                    Ok(Contains) => {}
-                    Err(e) => {}
+                    Ok(Contains) => {
+                        let _ = handle_contains_request(&mut stream, &mut storage);
+                    }
+                    // Rather than dropping invalid requests silently, consider an
+                    // InvalidRequestResponse message.
+                    Err(_) => {}
                 },
             }
         }
@@ -47,51 +79,102 @@ pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> std::io::
 }
 
 fn handle_put_request(
-    stream: &mut (impl Read + Write),
+    mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let response = match PutRequest::decode(&mut stream) {
-        Err(_) => PutResponse {
+) -> Result<(), TCPLayerError> {
+    let Ok(request) = PutRequest::decode(&mut stream) else {
+        let response = PutResponse {
             status: InvalidRequest,
+        };
+        stream.write_all(&response.encode()?)?;
+        return Ok(());
+    };
+
+    let write_request = WriteRequest {
+        key: &request.key,
+        val: &request.val,
+    };
+
+    let response = match storage.write(&write_request) {
+        Ok(_) => PutResponse { status: Success },
+        Err(_) => PutResponse {
+            status: InternalError,
         },
-        Ok(request) => {
-            let writeRequest = WriteRequest {
-                key: &request.key,
-                val: &request.val,
-            };
-            match storage.write(&writeRequest) {
-                Ok(_) => PutResponse { status: Success },
-                Err(_) => PutResponse {
-                    status: InternalError,
-                },
-            }
-        }
     };
 
     let buf = response.encode()?;
     stream.write_all(&buf)?;
+    Ok(())
 }
 
-fn handle_get_request(stream: &mut (impl Read + Write), storage: &mut Storage) {
-    let response = match GetRequest::decode(&mut stream) {
-        Err(_) => GetResponse {
-            status: InvalidRequest,
-            val: "".into(),
-        },
-        Ok(request) => {
-            let read_request = ReadRequest { key: &request.key };
-            match storage.read(&read_request) {
-                Ok(ReadResponse { key, val }) => GetResponse {
-                    status: Success,
-                    val,
-                },
-                Err(_) => GetResponse {
-                    status: InternalError,
-                    val: "".into(),
-                },
-            }
-        }
+fn handle_get_request(
+    mut stream: &mut (impl Read + Write),
+    storage: &mut Storage,
+) -> Result<(), TCPLayerError> {
+    let Ok(request) = GetRequest::decode(&mut stream) else {
+        let response = GetResponse::failed(InvalidRequest);
+        stream.write_all(&response.encode()?)?;
+        return Ok(());
     };
 
-    stream.write_all(response.encode());
+    let read_request = ReadRequest { key: &request.key };
+
+    let response = match storage.read(&read_request) {
+        Ok(ReadResponse { val, .. }) => GetResponse {
+            status: Success,
+            val,
+        },
+        Err(_) => GetResponse::failed(InternalError),
+    };
+
+    stream.write_all(&response.encode()?)?;
+    Ok(())
+}
+
+fn handle_delete_request(
+    mut stream: &mut (impl Read + Write),
+    storage: &mut Storage,
+) -> Result<(), TCPLayerError> {
+    let Ok(request) = DeleteRequest::decode(&mut stream) else {
+        let response = DeleteResponse {
+            status: InvalidRequest,
+        };
+        stream.write_all(&response.encode()?)?;
+        return Ok(());
+    };
+
+    let delete_request = crate::storage::DeleteRequest { key: &request.key };
+
+    let response = match storage.delete(&delete_request) {
+        Ok(_) => DeleteResponse { status: Success },
+        Err(_) => DeleteResponse {
+            status: InternalError,
+        },
+    };
+
+    let buf = response.encode()?;
+    stream.write_all(&buf)?;
+    Ok(())
+}
+
+fn handle_contains_request(
+    mut stream: &mut (impl Read + Write),
+    storage: &mut Storage,
+) -> Result<(), TCPLayerError> {
+    let Ok(request) = ContainsRequest::decode(&mut stream) else {
+        let response = ContainsResponse::failed(InvalidRequest);
+        stream.write_all(&response.encode()?)?;
+        return Ok(());
+    };
+
+    let contains_request = crate::storage::ContainsRequest { key: &request.key };
+
+    let response = ContainsResponse {
+        status: Success,
+        contains: storage.contains(&contains_request),
+    };
+
+    let buf = response.encode()?;
+    stream.write_all(&buf)?;
+    Ok(())
 }

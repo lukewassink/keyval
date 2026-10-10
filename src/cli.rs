@@ -2,38 +2,76 @@ use clap::Parser;
 use easy_repl::{CommandStatus, Repl, command};
 use std::cell::RefCell;
 use storage::Storage;
+use thiserror::Error;
 
-use crate::storage::{self, ContainsRequest, DeleteRequest, ReadRequest, WriteRequest};
+use crate::{
+    storage::{self, ContainsRequest, DeleteRequest, ReadRequest, WriteRequest},
+    tcp_handler,
+};
+
+#[derive(Error, Debug)]
+pub enum CLIError {
+    #[error("{0}")]
+    Database(#[from] crate::storage::StorageError),
+    #[error("{0}")]
+    Tcp(#[from] tcp_handler::TCPLayerError),
+    #[error("IO error: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("REPL error: {0}")]
+    Repl(String),
+}
+
+impl From<easy_repl::CriticalError> for CLIError {
+    fn from(e: easy_repl::CriticalError) -> Self {
+        CLIError::Repl(format!("{:?}", e))
+    }
+}
+
+impl From<easy_repl::anyhow::Error> for CLIError {
+    fn from(e: easy_repl::anyhow::Error) -> Self {
+        CLIError::Repl(format!("{:?}", e))
+    }
+}
+
+impl From<easy_repl::repl::BuilderError> for CLIError {
+    fn from(e: easy_repl::repl::BuilderError) -> Self {
+        CLIError::Repl(format!("{:?}", e))
+    }
+}
 
 #[derive(Parser)]
 struct Cli {
-    path: String,
+    /// Path to the database file
+    filepath: String,
+
+    /// Expose remote TCP interface rather than interactive CLI. Requires <address> to be set.
+    #[arg(long)]
+    tcp: bool,
+
+    /// TCP socket address in the form: (ip address):(port number)
+    #[arg(short, long)]
+    address: String,
 }
 
-pub fn run_cli() {
+pub fn run_cli() -> Result<(), CLIError> {
     let cli = Cli::parse();
 
-    let s = match Storage::initialize(&cli.path) {
-        Ok(s) => s,
-        Err(e) => {
-            println!("Could not initialize database due to error: {:?}", e);
-            return;
-        }
-    };
+    let storage = Storage::initialize(&cli.filepath)?;
 
-    let s = RefCell::new(s);
-    let put_s = &s;
-    let get_s = &s;
-    let delete_s = &s;
-    let contains_s = &s;
+    if cli.tcp {
+        let listener = tcp_handler::create_listener(cli.address)?;
+        return tcp_handler::handle_requests(listener, storage).map_err(Into::into);
+    }
 
-    let repl = Repl::builder()
+    let storage = &RefCell::new(storage);
+
+    let mut repl = Repl::builder()
         .add(
             "put",
             command! {
                 "Put the pair (key, val)",
                 (key: String, val: String) => |key: String, val: String| {
-                    match put_s.borrow_mut().write(&WriteRequest{key: &key, val: &val}) {
+                    match storage.borrow_mut().write(&WriteRequest{key: &key, val: &val}) {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Put failed with error {:?}", e)}
                     }
@@ -45,7 +83,7 @@ pub fn run_cli() {
             command! {
                 "Get the value for <key>",
                 (key: String) => |key: String| {
-                    match get_s.borrow_mut().read(&ReadRequest{key: &key}) {
+                    match storage.borrow_mut().read(&ReadRequest{key: &key}) {
                         Ok(response) => { println!("val: {}", response.val); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
@@ -57,7 +95,7 @@ pub fn run_cli() {
             command! {
                 "Delete the entry for <key>",
                 (key: String) => |key: String| {
-                    match delete_s.borrow_mut().delete(&DeleteRequest{key: &key}) {
+                    match storage.borrow_mut().delete(&DeleteRequest{key: &key}) {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
@@ -69,19 +107,12 @@ pub fn run_cli() {
             command! {
                 "Check if there is an entry for <key>",
                 (key: String) => |key: String| {
-                    let c = contains_s.borrow_mut().contains(&ContainsRequest{key: &key});
+                    let c = storage.borrow_mut().contains(&ContainsRequest{key: &key});
                     println!("contains: {}", c);
                     Ok(CommandStatus::Done)
             }},
         )
-        .build();
+        .build()?;
 
-    match repl {
-        Ok(mut r) => {
-            r.run();
-        }
-        Err(e) => {
-            println!("Failed to start with error: {:?}", e);
-        }
-    }
+    repl.run().map_err(Into::into)
 }
