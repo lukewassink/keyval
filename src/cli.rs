@@ -50,7 +50,7 @@ struct Cli {
 
     /// TCP socket address in the form: (ip address):(port number)
     #[arg(short, long)]
-    address: String,
+    address: Option<String>,
 }
 
 pub fn run_cli() -> Result<(), CLIError> {
@@ -59,7 +59,11 @@ pub fn run_cli() -> Result<(), CLIError> {
     let storage = Storage::initialize(&cli.filepath)?;
 
     if cli.tcp {
-        let listener = tcp_handler::create_listener(cli.address)?;
+        let Some(address) = cli.address else {
+            println!("Address field must be set to use TCP.");
+            return Ok(());
+        };
+        let listener = tcp_handler::create_listener(address)?;
         return tcp_handler::handle_requests(listener, storage).map_err(Into::into);
     }
 

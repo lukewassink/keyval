@@ -3,6 +3,9 @@ use thiserror::Error;
 pub mod decoding;
 pub mod encoding;
 
+#[cfg(test)]
+mod encoding_tests;
+
 #[derive(Debug, Error)]
 pub enum EncodingError {
     #[error("{0}")]
@@ -39,12 +42,12 @@ pub enum Status {
     KeyNotFound,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct GetRequest {
     pub key: String,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct GetResponse {
     pub status: Status,
     pub val: String,
@@ -59,33 +62,33 @@ impl GetResponse {
     }
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct PutRequest {
     pub key: String,
     pub val: String,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct PutResponse {
     pub status: Status,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct DeleteRequest {
     pub key: String,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct DeleteResponse {
     pub status: Status,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct ContainsRequest {
     pub key: String,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub struct ContainsResponse {
     pub status: Status,
     pub contains: bool,

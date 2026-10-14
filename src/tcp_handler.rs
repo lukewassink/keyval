@@ -84,13 +84,17 @@ fn handle_put_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
 ) -> Result<(), TCPLayerError> {
+    println!("handling put requrest");
     let Ok(request) = PutRequest::decode(&mut stream) else {
+        println!("Error!");
         let response = PutResponse {
             status: InvalidRequest,
         };
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
+
+    println!("Request: {:?}", request);
 
     let write_request = WriteRequest {
         key: &request.key,

@@ -81,8 +81,8 @@ impl GetResponse {
 impl PutRequest {
     pub fn decode(reader: &mut impl Read) -> Result<PutRequest, DecodingError> {
         let key_len = decode_u64(reader)?;
-        let key = decode_string(reader, key_len)?;
         let val_len = decode_u64(reader)?;
+        let key = decode_string(reader, key_len)?;
         let val = decode_string(reader, val_len)?;
         Ok(PutRequest { key, val })
     }

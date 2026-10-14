@@ -1,5 +1,5 @@
 use crate::{
-    ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse,
+    ContainsRequest, ContainsResponse, DecodingError, DeleteRequest, DeleteResponse,
     EncodingError::{self, InvalidFailureResponse},
     GetRequest, GetResponse,
     Operation::{self, Contains, Delete, Get, Put},
@@ -93,7 +93,7 @@ impl DeleteRequest {
 impl DeleteResponse {
     pub fn encode(&self) -> Result<Vec<u8>, EncodingError> {
         let mut buf: [u8; 2] = [0; 2];
-        buf[0] = Put.encode();
+        buf[0] = Delete.encode();
         buf[1] = self.status.encode();
 
         Ok(buf.into())
@@ -113,10 +113,41 @@ impl ContainsRequest {
 impl ContainsResponse {
     pub fn encode(&self) -> Result<Vec<u8>, EncodingError> {
         let mut buf: [u8; 3] = [0; 3];
-        buf[0] = Put.encode();
+        buf[0] = Contains.encode();
         buf[1] = self.status.encode();
         buf[2] = self.contains.into();
 
         Ok(buf.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_op_code() -> Result<(), DecodingError> {
+        let p = Operation::Put;
+        assert!(Operation::decode(p.encode())? == p);
+        let g = Operation::Get;
+        assert!(Operation::decode(g.encode())? == g);
+        let d = Operation::Delete;
+        assert!(Operation::decode(d.encode())? == d);
+        let c = Operation::Contains;
+        assert!(Operation::decode(c.encode())? == c);
+        Ok(())
+    }
+
+    #[test]
+    fn encode_status() -> Result<(), DecodingError> {
+        let s = Status::Success;
+        assert!(Status::decode(s.encode())? == s);
+        let i = Status::InternalError;
+        assert!(Status::decode(i.encode())? == i);
+        let i = Status::InvalidRequest;
+        assert!(Status::decode(i.encode())? == i);
+        let k = Status::KeyNotFound;
+        assert!(Status::decode(k.encode())? == k);
+        Ok(())
     }
 }
