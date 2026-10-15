@@ -72,7 +72,7 @@ fn put_request() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn put_respose() -> Result<(), Box<dyn Error>> {
+fn put_response() -> Result<(), Box<dyn Error>> {
     let response = PutResponse {
         status: Status::InvalidRequest,
     };

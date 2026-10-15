@@ -2,7 +2,7 @@ use std::io::prelude::*;
 use std::net::TcpStream;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "localhost:49152";
+    let address = "localhost:49153";
     let mut stream = TcpStream::connect(address)?;
     println!("Streaming to {}...", address);
 
@@ -12,11 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     .encode()?;
 
-    println!("writing...");
-
     stream.write_all(&put)?;
-
-    println!("written!");
 
     let mut op_buf: [u8; 1] = [0; 1];
 
