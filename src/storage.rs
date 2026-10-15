@@ -129,10 +129,6 @@ fn parse_string(reader: &mut impl Read, len: u64) -> Result<String, StorageError
 }
 
 impl Storage {
-    pub fn print_offsets(&self) -> String {
-        format!("{:?}", self.offsets)
-    }
-
     fn parse_offsets(
         reader: &mut (impl Read + Seek),
         file_length: u64,
@@ -186,6 +182,10 @@ impl Storage {
             offsets,
             next_offset,
         })
+    }
+
+    pub fn quit(&mut self) -> Result<(), StorageError> {
+        self.file.flush().map_err(Into::into)
     }
 
     pub fn write(&mut self, request: &WriteRequest) -> std::io::Result<()> {

@@ -1,72 +1,47 @@
-use clap::Parser;
+use easy_repl::repl::LoopStatus;
 use easy_repl::{CommandStatus, Repl, command};
-use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::{cell::RefCell, sync::atomic::AtomicBool};
 use storage::Storage;
 use thiserror::Error;
 
 use crate::{
     storage::{self, ContainsRequest, DeleteRequest, ReadRequest, WriteRequest},
-    tcp_handler,
+    tcp,
 };
 
 #[derive(Error, Debug)]
-pub enum CLIError {
+pub enum ReplError {
     #[error("{0}")]
     Database(#[from] crate::storage::StorageError),
     #[error("{0}")]
-    Tcp(#[from] tcp_handler::TCPLayerError),
+    Tcp(#[from] tcp::TcpHandlerError),
     #[error("IO error: {0}")]
     IOError(#[from] std::io::Error),
     #[error("REPL error: {0}")]
     Repl(String),
 }
 
-impl From<easy_repl::CriticalError> for CLIError {
+impl From<easy_repl::CriticalError> for ReplError {
     fn from(e: easy_repl::CriticalError) -> Self {
-        CLIError::Repl(format!("{:?}", e))
+        ReplError::Repl(format!("{:?}", e))
     }
 }
 
-impl From<easy_repl::anyhow::Error> for CLIError {
+impl From<easy_repl::anyhow::Error> for ReplError {
     fn from(e: easy_repl::anyhow::Error) -> Self {
-        CLIError::Repl(format!("{:?}", e))
+        ReplError::Repl(format!("{:?}", e))
     }
 }
 
-impl From<easy_repl::repl::BuilderError> for CLIError {
+impl From<easy_repl::repl::BuilderError> for ReplError {
     fn from(e: easy_repl::repl::BuilderError) -> Self {
-        CLIError::Repl(format!("{:?}", e))
+        ReplError::Repl(format!("{:?}", e))
     }
 }
 
-#[derive(Parser)]
-struct Cli {
-    /// Path to the database file
-    filepath: String,
-
-    /// Expose remote TCP interface rather than interactive CLI. Requires <address> to be set.
-    #[arg(long)]
-    tcp: bool,
-
-    /// TCP socket address in the form: (ip address):(port number)
-    #[arg(short, long)]
-    address: Option<String>,
-}
-
-pub fn run_cli() -> Result<(), CLIError> {
-    let cli = Cli::parse();
-
-    let storage = Storage::initialize(&cli.filepath)?;
-
-    if cli.tcp {
-        let Some(address) = cli.address else {
-            println!("Address field must be set to use TCP.");
-            return Ok(());
-        };
-        let listener = tcp_handler::create_listener(address)?;
-        return tcp_handler::handle_requests(listener, storage).map_err(Into::into);
-    }
-
+pub fn run_repl(storage: &mut Storage, running: Arc<AtomicBool>) -> Result<(), ReplError> {
     let storage = &RefCell::new(storage);
 
     let mut repl = Repl::builder()
@@ -118,5 +93,10 @@ pub fn run_cli() -> Result<(), CLIError> {
         )
         .build()?;
 
-    repl.run().map_err(Into::into)
+    loop {
+        let status = repl.next()?;
+        if status == LoopStatus::Break || !running.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+    }
 }

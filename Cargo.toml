@@ -5,6 +5,9 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = "3.5.2"
 easy-repl = "0.2.1"
-protocol ={ path = "./protocol" }
+protocol = { path = "./protocol" }
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+toml = "1.1.8"

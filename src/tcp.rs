@@ -6,13 +6,15 @@ use protocol::{
 };
 use std::io::Read;
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::*;
 
 use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
 
 #[derive(Error, Debug)]
-pub enum TCPLayerError {
+pub enum TcpHandlerError {
     #[error("{0}")]
     Database(#[from] crate::storage::StorageError),
     #[error("Error decoding request: {0}")]
@@ -23,11 +25,15 @@ pub enum TCPLayerError {
     TCPStream(#[from] std::io::Error),
 }
 
-pub fn create_listener(socket_addr: String) -> std::io::Result<TcpListener> {
+pub fn create_listener(socket_addr: SocketAddr) -> std::io::Result<TcpListener> {
     TcpListener::bind(socket_addr)
 }
 
-pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<(), TCPLayerError> {
+pub fn handle_requests(
+    listener: TcpListener,
+    mut storage: &mut Storage,
+    running: Arc<AtomicBool>,
+) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
         println!("Could not access local address.");
         return Ok(());
@@ -75,6 +81,10 @@ pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<()
                     Err(_) => {}
                 },
             }
+
+            if !running.load(Ordering::SeqCst) {
+                return Ok(());
+            }
         }
     }
     Ok(())
@@ -83,7 +93,7 @@ pub fn handle_requests(listener: TcpListener, mut storage: Storage) -> Result<()
 fn handle_put_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
-) -> Result<(), TCPLayerError> {
+) -> Result<(), TcpHandlerError> {
     println!("handling put requrest");
     let Ok(request) = PutRequest::decode(&mut stream) else {
         println!("Error!");
@@ -116,7 +126,7 @@ fn handle_put_request(
 fn handle_get_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
-) -> Result<(), TCPLayerError> {
+) -> Result<(), TcpHandlerError> {
     let Ok(request) = GetRequest::decode(&mut stream) else {
         let response = GetResponse::failed(InvalidRequest);
         stream.write_all(&response.encode()?)?;
@@ -140,7 +150,7 @@ fn handle_get_request(
 fn handle_delete_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
-) -> Result<(), TCPLayerError> {
+) -> Result<(), TcpHandlerError> {
     let Ok(request) = DeleteRequest::decode(&mut stream) else {
         let response = DeleteResponse {
             status: InvalidRequest,
@@ -166,7 +176,7 @@ fn handle_delete_request(
 fn handle_contains_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
-) -> Result<(), TCPLayerError> {
+) -> Result<(), TcpHandlerError> {
     let Ok(request) = ContainsRequest::decode(&mut stream) else {
         let response = ContainsResponse::failed(InvalidRequest);
         stream.write_all(&response.encode()?)?;
