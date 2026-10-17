@@ -7,8 +7,6 @@ use protocol::{
 use std::io::Read;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::*;
 
 use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
@@ -31,8 +29,7 @@ pub fn create_listener(socket_addr: SocketAddr) -> std::io::Result<TcpListener> 
 
 pub fn handle_requests(
     listener: TcpListener,
-    mut storage: &mut Storage,
-    running: Arc<AtomicBool>,
+    storage: &mut Storage,
 ) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
         println!("Could not access local address.");
@@ -66,24 +63,20 @@ pub fn handle_requests(
                 }
                 Ok(_) => match Operation::decode(op_buf[0]) {
                     // How to handle errors here? Maybe log them in some way?
-                    Ok(Put) => match handle_put_request(&mut stream, &mut storage) {
+                    Ok(Put) => match handle_put_request(&mut stream, storage) {
                         Ok(_) => println!("Put from {}", address),
                         Err(e) => println!("Error in put from {}, {}", address, e),
                     },
-                    Ok(Get) => match handle_get_request(&mut stream, &mut storage) {
+                    Ok(Get) => match handle_get_request(&mut stream, storage) {
                         Ok(_) => println!("Put from {}", address),
                         Err(e) => println!("Error in put from {}, {}", address, e),
                     },
-                    Ok(Delete) => handle_delete_request(&mut stream, &mut storage)?,
-                    Ok(Contains) => handle_contains_request(&mut stream, &mut storage)?,
+                    Ok(Delete) => handle_delete_request(&mut stream, storage)?,
+                    Ok(Contains) => handle_contains_request(&mut stream, storage)?,
                     // Rather than dropping invalid requests silently, consider an
                     // InvalidRequestResponse message.
                     Err(_) => {}
                 },
-            }
-
-            if !running.load(Ordering::SeqCst) {
-                return Ok(());
             }
         }
     }

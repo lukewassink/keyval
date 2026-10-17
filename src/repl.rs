@@ -1,8 +1,5 @@
-use easy_repl::repl::LoopStatus;
 use easy_repl::{CommandStatus, Repl, command};
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use std::{cell::RefCell, sync::atomic::AtomicBool};
+use std::cell::RefCell;
 use storage::Storage;
 use thiserror::Error;
 
@@ -41,7 +38,7 @@ impl From<easy_repl::repl::BuilderError> for ReplError {
     }
 }
 
-pub fn run_repl(storage: &mut Storage, running: Arc<AtomicBool>) -> Result<(), ReplError> {
+pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
     let storage = &RefCell::new(storage);
 
     let mut repl = Repl::builder()
@@ -93,10 +90,6 @@ pub fn run_repl(storage: &mut Storage, running: Arc<AtomicBool>) -> Result<(), R
         )
         .build()?;
 
-    loop {
-        let status = repl.next()?;
-        if status == LoopStatus::Break || !running.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-    }
+    repl.run()?;
+    Ok(())
 }

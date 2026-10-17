@@ -29,6 +29,7 @@ pub struct ContainsRequest<'a> {
 
 #[derive(Debug)]
 pub struct ReadResponse {
+    #[allow(dead_code)]
     pub key: String,
     pub val: String,
 }
@@ -72,7 +73,6 @@ impl Operation {
 
 #[derive(Debug)]
 pub struct Storage {
-    file_path: String,
     file: File,
     offsets: HashMap<String, u64>,
     next_offset: u64,
@@ -177,7 +177,6 @@ impl Storage {
         let (offsets, next_offset) = Storage::parse_offsets(&mut file, length)?;
 
         Ok(Storage {
-            file_path: file_path.to_string(),
             file,
             offsets,
             next_offset,

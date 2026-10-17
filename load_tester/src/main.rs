@@ -1,5 +1,28 @@
+mod config;
+mod user;
+
+use clap::error;
 use std::io::prelude::*;
 use std::net::TcpStream;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum Error {
+    #[error("Invalid load tester config: {0}")]
+    InvalidConfig(String),
+    #[error("{0}")]
+    Cli(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Error parsing the config: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("Error generating random values: {0}")]
+    Random(#[from] rand::distr::uniform::Error),
+    #[error("{0}")]
+    Internal(#[from] std::string::FromUtf8Error),
+    #[error("Error creating requests: {0}")]
+    Encoding(#[from] protocol::EncodingError),
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = "localhost:49153";

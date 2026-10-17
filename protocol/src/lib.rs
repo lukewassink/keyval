@@ -42,6 +42,18 @@ pub enum Status {
     KeyNotFound,
 }
 
+pub trait Request {}
+impl Request for GetRequest {}
+impl Request for PutRequest {}
+impl Request for DeleteRequest {}
+impl Request for ContainsRequest {}
+
+pub trait Response {}
+impl Response for GetResponse {}
+impl Response for PutResponse {}
+impl Response for DeleteResponse {}
+impl Response for ContainsResponse {}
+
 #[derive(PartialEq, Debug)]
 pub struct GetRequest {
     pub key: String,

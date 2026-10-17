@@ -1,5 +1,5 @@
 use crate::{
-    ContainsRequest, ContainsResponse, DecodingError, DeleteRequest, DeleteResponse,
+    ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse,
     EncodingError::{self, InvalidFailureResponse},
     GetRequest, GetResponse,
     Operation::{self, Contains, Delete, Get, Put},
@@ -124,6 +124,7 @@ impl ContainsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DecodingError;
 
     #[test]
     fn encode_op_code() -> Result<(), DecodingError> {
