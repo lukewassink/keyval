@@ -1,10 +1,16 @@
+use protocol::message::Message;
+use std::net::TcpStream;
+use std::thread;
+use std::{io::prelude::*, thread::JoinHandle};
+use thiserror::Error;
+
+use crate::{
+    config::{get_config_path, load_config},
+    user::{generate_requests, run_user},
+};
+
 mod config;
 mod user;
-
-use clap::error;
-use std::io::prelude::*;
-use std::net::TcpStream;
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 enum Error {
@@ -24,23 +30,34 @@ enum Error {
     Encoding(#[from] protocol::EncodingError),
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "localhost:49153";
-    let mut stream = TcpStream::connect(address)?;
-    println!("Streaming to {}...", address);
+fn main() -> Result<(), Error> {
+    // Config.
+    let config_path = get_config_path()?;
+    let config = load_config(config_path)?;
+    let address = config.db_address;
 
-    let put = protocol::PutRequest {
-        key: "hi".to_string(),
-        val: "there".to_string(),
+    // Generate requests.
+    let mut requests_list: Vec<Vec<Vec<u8>>> = Vec::new();
+    for id in 0..config.users {
+        requests_list.push(generate_requests(&config, id)?);
     }
-    .encode()?;
 
-    stream.write_all(&put)?;
+    let mut handles: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
 
-    let mut op_buf: [u8; 1] = [0; 1];
+    println!("Streaming to {}...", address);
+    for requests in requests_list.into_iter() {
+        let mut stream = TcpStream::connect(address)?;
 
-    stream.read_exact(&mut op_buf)?;
-    println!("Op: {:?}", protocol::Operation::decode(op_buf[0]));
-    println!("Response: {:?}", protocol::PutResponse::decode(&mut stream));
+        handles.push(thread::spawn(move || -> Result<(), Error> {
+            run_user(&mut stream, requests)
+        }));
+    }
+
+    for (id, handle) in handles.into_iter().enumerate() {
+        if let Err(e) = handle.join() {
+            println!("Error for user {}: {:?}", id, e);
+        }
+    }
+
     Ok(())
 }

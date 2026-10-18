@@ -1,7 +1,8 @@
 use crate::Error;
 use crate::config::Config;
 use core::ops::Range;
-use protocol::{GetRequest, PutRequest};
+use protocol::message::Message;
+use protocol::{GetRequest, PutRequest, Response};
 use rand::{RngExt, distr::uniform::SampleRange};
 use std::io::{Read, Write};
 
@@ -54,7 +55,10 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<Vec<Vec<u8>>
     Ok(requests)
 }
 
-pub fn run_user(stream: impl Read + Write, requests: Vec<Vec<u8>>) -> Result<(), Error> {
-    for request in requests {}
+pub fn run_user(stream: &mut (impl Read + Write), requests: Vec<Vec<u8>>) -> Result<(), Error> {
+    for request in requests {
+        stream.write_all(&request)?;
+        let _ = Response::decode(stream);
+    }
     Ok(())
 }

@@ -14,6 +14,7 @@ use crate::PutRequest;
 use crate::PutResponse;
 use crate::Status;
 use crate::Status::Success;
+use crate::message::Message;
 
 #[test]
 fn get_request() -> Result<(), Box<dyn Error>> {

@@ -1,10 +1,9 @@
 use thiserror::Error;
 
-pub mod decoding;
-pub mod encoding;
+pub mod message;
 
 #[cfg(test)]
-mod encoding_tests;
+mod message_tests;
 
 #[derive(Debug, Error)]
 pub enum EncodingError {
@@ -42,17 +41,21 @@ pub enum Status {
     KeyNotFound,
 }
 
-pub trait Request {}
-impl Request for GetRequest {}
-impl Request for PutRequest {}
-impl Request for DeleteRequest {}
-impl Request for ContainsRequest {}
+#[derive(PartialEq, Debug)]
+pub enum Request {
+    Get(GetRequest),
+    Put(PutRequest),
+    Delete(DeleteRequest),
+    Contains(ContainsRequest),
+}
 
-pub trait Response {}
-impl Response for GetResponse {}
-impl Response for PutResponse {}
-impl Response for DeleteResponse {}
-impl Response for ContainsResponse {}
+#[derive(PartialEq, Debug)]
+pub enum Response {
+    Get(GetResponse),
+    Put(PutResponse),
+    Delete(DeleteResponse),
+    Contains(ContainsResponse),
+}
 
 #[derive(PartialEq, Debug)]
 pub struct GetRequest {

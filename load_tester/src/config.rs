@@ -1,7 +1,7 @@
 use crate::Error;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::{fmt::format, net::SocketAddr};
+use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {

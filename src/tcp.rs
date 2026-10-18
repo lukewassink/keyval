@@ -1,5 +1,6 @@
 use protocol::Operation::{self, Contains, Delete, Get, Put};
 use protocol::Status::{InternalError, InvalidRequest, Success};
+use protocol::message::Message;
 use protocol::{
     ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
     PutRequest, PutResponse,
