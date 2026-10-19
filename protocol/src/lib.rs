@@ -25,7 +25,7 @@ pub enum DecodingError {
     InvalidBoolean(u8),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Operation {
     Put,
     Get,
@@ -33,7 +33,7 @@ pub enum Operation {
     Contains,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Status {
     Success,
     InternalError,

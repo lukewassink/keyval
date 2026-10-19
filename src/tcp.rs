@@ -69,7 +69,7 @@ pub fn handle_requests(
                         Err(e) => println!("Error in put from {}, {}", address, e),
                     },
                     Ok(Get) => match handle_get_request(&mut stream, storage) {
-                        Ok(_) => println!("Put from {}", address),
+                        Ok(_) => println!("Get from {}", address),
                         Err(e) => println!("Error in put from {}, {}", address, e),
                     },
                     Ok(Delete) => handle_delete_request(&mut stream, storage)?,

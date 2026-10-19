@@ -1,8 +1,9 @@
 use crate::Error;
 use crate::config::Config;
+use crate::output::MessageData;
 use core::ops::Range;
 use protocol::message::Message;
-use protocol::{GetRequest, Operation, PutRequest, Request, Response};
+use protocol::{GetRequest, Operation, PutRequest, Response};
 use rand::{RngExt, distr::uniform::SampleRange};
 use std::io::{Read, Write};
 use std::time::Instant;
@@ -58,13 +59,24 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<TestRequests
     Ok(requests)
 }
 
-pub fn run_user(stream: &mut (impl Read + Write), requests: TestRequests) -> Result<(), Error> {
+pub fn run_user(
+    stream: &mut (impl Read + Write),
+    requests: TestRequests,
+) -> Result<Vec<MessageData>, Error> {
+    let mut data: Vec<MessageData> = Vec::with_capacity(requests.len());
     for (op, request) in requests {
-        let start = Instant::now();
+        let send_time = Instant::now();
         stream.write_all(&request)?;
-        let finish = Instant::now();
+        let recipt_time = Instant::now();
 
         let response = Response::decode(stream);
+
+        data.push(MessageData::from_message(
+            op,
+            response,
+            send_time,
+            recipt_time,
+        ));
     }
-    Ok(())
+    Ok(data)
 }

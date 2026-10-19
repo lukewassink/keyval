@@ -1,0 +1,7 @@
+status,operation,round_trip
+Success,Put,14875
+Success,Put,15000
+Success,Get,11083
+Success,Get,7709
+Success,Get,6417
+Success,Get,5041

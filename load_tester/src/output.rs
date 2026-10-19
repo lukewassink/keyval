@@ -1,24 +1,32 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use protocol::{Response, Status};
+
+#[serde_with::serde_as]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MessageData {
     pub status: protocol::Status,
     pub operation: protocol::Operation,
-    pub send_time: Instant,
-    pub recipt_time: Instant,
+    #[serde_as(as = "serde_with::DurationNanoSeconds<u64>")]
+    pub round_trip: Duration,
 }
 
 impl MessageData {
-    fn from_message(
+    pub fn from_message(
         op: protocol::Operation,
-        response: protocol::Response,
+        response: Result<Response, protocol::DecodingError>,
         send_time: Instant,
         recipt_time: Instant,
     ) -> Self {
+        let status: protocol::Status = match response {
+            Err(_) => Status::InternalError,
+            Ok(r) => (*r.status()).clone(),
+        };
+
         Self {
-            send_time,
-            recipt_time,
+            round_trip: recipt_time - send_time,
             operation: op,
-            status: (*response.status()).clone(),
+            status,
         }
     }
 }

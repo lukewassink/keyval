@@ -5,8 +5,10 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+csv = "1.4.0"
 protocol = { path = "../protocol" }
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_with = "3.24.0"
 thiserror = "2.0.21"
 toml = "1.1.8"

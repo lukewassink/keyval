@@ -1,10 +1,11 @@
-use std::net::TcpStream;
 use std::thread;
 use std::thread::JoinHandle;
+use std::{fs::OpenOptions, net::TcpStream};
 use thiserror::Error;
 
 use crate::{
     config::{get_config_path, load_config},
+    output::MessageData,
     user::{TestRequests, generate_requests, run_user},
 };
 
@@ -28,6 +29,8 @@ enum Error {
     Internal(#[from] std::string::FromUtf8Error),
     #[error("Error creating requests: {0}")]
     Encoding(#[from] protocol::EncodingError),
+    #[error("Error serializing to CSV: {0}")]
+    Csv(#[from] csv::Error),
 }
 
 fn main() -> Result<(), Error> {
@@ -42,22 +45,40 @@ fn main() -> Result<(), Error> {
         requests_list.push(generate_requests(&config, id)?);
     }
 
-    let mut handles: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+    let mut handles: Vec<JoinHandle<Result<Vec<MessageData>, Error>>> = Vec::new();
 
     println!("Streaming to {}...", address);
     for requests in requests_list.into_iter() {
         let mut stream = TcpStream::connect(address)?;
 
-        handles.push(thread::spawn(move || -> Result<(), Error> {
-            run_user(&mut stream, requests)
-        }));
+        handles.push(thread::spawn(move || run_user(&mut stream, requests)));
     }
 
+    let mut test_data: Vec<MessageData> = Vec::with_capacity(config.total_requests());
     for (id, handle) in handles.into_iter().enumerate() {
-        if let Err(e) = handle.join() {
-            println!("Error for user {}: {:?}", id, e);
+        match handle.join().unwrap() {
+            Err(e) => {
+                println!("Error for user {}: {:?}", id, e);
+            }
+            Ok(data) => {
+                test_data.extend_from_slice(&data);
+            }
         }
     }
+
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(config.output_path)?;
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(true)
+        .from_writer(file);
+
+    for row in test_data {
+        writer.serialize(row)?;
+    }
+    writer.flush()?;
 
     Ok(())
 }

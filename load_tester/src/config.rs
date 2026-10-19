@@ -24,6 +24,12 @@ pub struct Config {
     pub max_val_length: usize,
 }
 
+impl Config {
+    pub fn total_requests(&self) -> usize {
+        (self.reads + self.writes) * self.users
+    }
+}
+
 #[derive(Debug, Parser)]
 struct Cli {
     config_path: String,
