@@ -1,15 +1,15 @@
-use protocol::message::Message;
 use std::net::TcpStream;
 use std::thread;
-use std::{io::prelude::*, thread::JoinHandle};
+use std::thread::JoinHandle;
 use thiserror::Error;
 
 use crate::{
     config::{get_config_path, load_config},
-    user::{generate_requests, run_user},
+    user::{TestRequests, generate_requests, run_user},
 };
 
 mod config;
+mod output;
 mod user;
 
 #[derive(Debug, Error)]
@@ -37,7 +37,7 @@ fn main() -> Result<(), Error> {
     let address = config.db_address;
 
     // Generate requests.
-    let mut requests_list: Vec<Vec<Vec<u8>>> = Vec::new();
+    let mut requests_list: Vec<TestRequests> = Vec::new();
     for id in 0..config.users {
         requests_list.push(generate_requests(&config, id)?);
     }

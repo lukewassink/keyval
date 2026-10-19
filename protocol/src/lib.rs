@@ -33,7 +33,7 @@ pub enum Operation {
     Contains,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Status {
     Success,
     InternalError,
@@ -55,6 +55,17 @@ pub enum Response {
     Put(PutResponse),
     Delete(DeleteResponse),
     Contains(ContainsResponse),
+}
+
+impl Response {
+    pub fn status(&self) -> &Status {
+        match self {
+            Response::Get(g) => &g.status,
+            Response::Put(p) => &p.status,
+            Response::Delete(d) => &d.status,
+            Response::Contains(c) => &c.status,
+        }
+    }
 }
 
 #[derive(PartialEq, Debug)]

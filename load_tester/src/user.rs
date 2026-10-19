@@ -2,9 +2,12 @@ use crate::Error;
 use crate::config::Config;
 use core::ops::Range;
 use protocol::message::Message;
-use protocol::{GetRequest, PutRequest, Response};
+use protocol::{GetRequest, Operation, PutRequest, Request, Response};
 use rand::{RngExt, distr::uniform::SampleRange};
 use std::io::{Read, Write};
+use std::time::Instant;
+
+pub type TestRequests = Vec<(Operation, Vec<u8>)>;
 
 fn random_string(range: &Range<usize>) -> Result<String, Error> {
     let mut rng = rand::rng();
@@ -19,7 +22,7 @@ fn random_string(range: &Range<usize>) -> Result<String, Error> {
     Ok(s)
 }
 
-pub fn generate_requests(config: &Config, user_id: usize) -> Result<Vec<Vec<u8>>, Error> {
+pub fn generate_requests(config: &Config, user_id: usize) -> Result<TestRequests, Error> {
     let mut rng = rand::rng();
     let key_size_range = config.min_val_length..config.max_val_length;
 
@@ -28,7 +31,7 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<Vec<Vec<u8>>
 
     let key_start = user_id * writes;
     let mut next_key = key_start;
-    let mut requests: Vec<Vec<u8>> = Vec::with_capacity(reads + writes);
+    let mut requests: TestRequests = Vec::with_capacity(reads + writes);
 
     for _ in 0..(reads + writes) {
         let pick = (0..reads + writes).sample_single(&mut rng)?;
@@ -40,7 +43,7 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<Vec<Vec<u8>>
                 val: random_string(&key_size_range)?,
             };
             next_key += 1;
-            requests.push(request.encode()?);
+            requests.push((Operation::Put, request.encode()?));
         } else {
             reads -= 1;
             let request = GetRequest {
@@ -48,17 +51,20 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<Vec<Vec<u8>>
                     .sample_single(&mut rng)?
                     .to_string(),
             };
-            requests.push(request.encode()?);
+            requests.push((Operation::Get, request.encode()?));
         }
     }
 
     Ok(requests)
 }
 
-pub fn run_user(stream: &mut (impl Read + Write), requests: Vec<Vec<u8>>) -> Result<(), Error> {
-    for request in requests {
+pub fn run_user(stream: &mut (impl Read + Write), requests: TestRequests) -> Result<(), Error> {
+    for (op, request) in requests {
+        let start = Instant::now();
         stream.write_all(&request)?;
-        let _ = Response::decode(stream);
+        let finish = Instant::now();
+
+        let response = Response::decode(stream);
     }
     Ok(())
 }

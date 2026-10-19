@@ -1,0 +1,7 @@
+users = 1
+writes = 2
+reads = 4
+db_address = "127.0.0.1:49153"
+output_path = "../run/loadtest_1.csv"
+min_val_length = 10
+max_val_length = 100
