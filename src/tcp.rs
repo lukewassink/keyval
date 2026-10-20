@@ -88,7 +88,6 @@ fn handle_put_request(
     mut stream: &mut (impl Read + Write),
     storage: &mut Storage,
 ) -> Result<(), TcpHandlerError> {
-    println!("handling put requrest");
     let Ok(request) = PutRequest::decode(&mut stream) else {
         println!("Error!");
         let response = PutResponse {
@@ -126,6 +125,8 @@ fn handle_get_request(
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
+
+    println!("Request: {:?}", request);
 
     let read_request = ReadRequest { key: &request.key };
 

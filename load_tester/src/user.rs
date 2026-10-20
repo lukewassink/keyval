@@ -48,9 +48,7 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<TestRequests
         } else {
             reads -= 1;
             let request = GetRequest {
-                key: (key_start..key_start + next_key)
-                    .sample_single(&mut rng)?
-                    .to_string(),
+                key: (key_start..next_key).sample_single(&mut rng)?.to_string(),
             };
             requests.push((Operation::Get, request.encode()?));
         }

@@ -2,6 +2,6 @@ users = 4
 writes = 10
 reads = 20
 db_address = "127.0.0.1:49153"
-output_path = "../run/loadtest_3.csv"
+output_path = "../run/loadtest_5.csv"
 min_val_length = 10
 max_val_length = 100
