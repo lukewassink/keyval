@@ -39,8 +39,8 @@ pub struct StartupCli {
     config_path: String,
 
     /// Path to the database file
-    #[arg(short, long)]
-    database_filepath: Option<String>,
+    #[arg(long)]
+    database_path: Option<String>,
 
     /// Use the interactive RPL instead of listening on a TCP socket.
     #[arg(long)]
@@ -63,7 +63,7 @@ pub fn build_config() -> Result<Config, ConfigError> {
     let mut config: Config = toml::from_str(&config)?;
 
     // Overrride config with cli options if set.
-    if let Some(path) = cli.database_filepath {
+    if let Some(path) = cli.database_path {
         config.database_path = path;
     }
     if cli.repl {

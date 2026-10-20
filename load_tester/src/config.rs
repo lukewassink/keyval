@@ -33,9 +33,12 @@ impl Config {
 #[derive(Debug, Parser)]
 struct Cli {
     config_path: String,
+
+    #[arg(long)]
+    output_path: Option<String>,
 }
 
-pub fn get_config_path() -> Result<String, Error> {
+pub fn get_config() -> Result<Config, Error> {
     // Get comand line options.
     let cli = Cli::parse();
 
@@ -43,10 +46,17 @@ pub fn get_config_path() -> Result<String, Error> {
         return Err(Error::Cli("Usage: loadtest PATH_TO_CONFIG".to_string()));
     }
 
-    Ok(cli.config_path)
+    let mut config = load_config(cli.config_path)?;
+
+    // Allow overriding output path from the command line.
+    if let Some(path) = cli.output_path {
+        config.output_path = path;
+    }
+
+    Ok(config)
 }
 
-pub fn load_config(config_path: String) -> Result<Config, Error> {
+fn load_config(config_path: String) -> Result<Config, Error> {
     let config = std::fs::read_to_string(config_path)?;
     let config: Config = toml::from_str(&config)?;
 

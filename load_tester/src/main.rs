@@ -4,7 +4,7 @@ use std::{fs::OpenOptions, net::TcpStream};
 use thiserror::Error;
 
 use crate::{
-    config::{get_config_path, load_config},
+    config::get_config,
     output::MessageData,
     user::{TestRequests, generate_requests, run_user},
 };
@@ -35,8 +35,7 @@ enum Error {
 
 fn main() -> Result<(), Error> {
     // Config.
-    let config_path = get_config_path()?;
-    let config = load_config(config_path)?;
+    let config = get_config()?;
     let address = config.db_address;
 
     // Generate requests.

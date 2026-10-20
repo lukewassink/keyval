@@ -46,13 +46,13 @@ pub fn handle_requests(
         let Ok(address) = stream.peer_addr() else {
             break;
         };
-        println!("Connected to {:?}", address);
+        // println!("Connected to {:?}", address);
 
         loop {
             let mut op_buf: [u8; 1] = [0; 1];
             match stream.read(&mut op_buf) {
                 Ok(0) => {
-                    println!("Connection terminated by {}", address);
+                    // println!("Connection terminated by {}", address);
                     break;
                 }
                 Err(e) => {
@@ -63,15 +63,9 @@ pub fn handle_requests(
                     break;
                 }
                 Ok(_) => match Operation::decode(op_buf[0]) {
-                    // How to handle errors here? Maybe log them in some way?
-                    Ok(Put) => match handle_put_request(&mut stream, storage) {
-                        Ok(_) => println!("Put from {}", address),
-                        Err(e) => println!("Error in put from {}, {}", address, e),
-                    },
-                    Ok(Get) => match handle_get_request(&mut stream, storage) {
-                        Ok(_) => println!("Get from {}", address),
-                        Err(e) => println!("Error in put from {}, {}", address, e),
-                    },
+                    // How to handle errors here? Maybe log them in some way
+                    Ok(Put) => handle_put_request(&mut stream, storage)?,
+                    Ok(Get) => handle_get_request(&mut stream, storage)?,
                     Ok(Delete) => handle_delete_request(&mut stream, storage)?,
                     Ok(Contains) => handle_contains_request(&mut stream, storage)?,
                     // Rather than dropping invalid requests silently, consider an
@@ -89,15 +83,12 @@ fn handle_put_request(
     storage: &mut Storage,
 ) -> Result<(), TcpHandlerError> {
     let Ok(request) = PutRequest::decode(&mut stream) else {
-        println!("Error!");
         let response = PutResponse {
             status: InvalidRequest,
         };
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
-
-    println!("Request: {:?}", request);
 
     let write_request = WriteRequest {
         key: &request.key,
@@ -125,8 +116,6 @@ fn handle_get_request(
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
-
-    println!("Request: {:?}", request);
 
     let read_request = ReadRequest { key: &request.key };
 
