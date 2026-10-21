@@ -1,5 +1,5 @@
 use easy_repl::{CommandStatus, Repl, command};
-use std::cell::RefCell;
+use std::{cell::RefCell, cmp::min};
 use storage::Storage;
 use thiserror::Error;
 
@@ -85,6 +85,17 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
                 (key: String) => |key: String| {
                     let c = storage.borrow_mut().contains(&ContainsRequest{key: &key});
                     println!("contains: {}", c);
+                    Ok(CommandStatus::Done)
+            }},
+        )
+        .add(
+            "keys",
+            command! {
+                "Print the first 100 keys",
+                () => || {
+                    let keys = storage.borrow().keys();
+                    let n = min(100, keys.len());
+                    println!("keys: {}\n==========\n{}", keys.len(), storage.borrow().keys()[..n].join("\n"));
                     Ok(CommandStatus::Done)
             }},
         )

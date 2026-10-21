@@ -239,4 +239,10 @@ impl Storage {
     pub fn contains(&self, request: &ContainsRequest) -> bool {
         self.offsets.contains_key(request.key)
     }
+
+    pub fn keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.offsets.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
 }
