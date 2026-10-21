@@ -28,6 +28,14 @@ impl Config {
     pub fn total_requests(&self) -> usize {
         (self.reads + self.writes) * self.users
     }
+
+    pub fn total_reads(&self) -> usize {
+        self.reads * self.users
+    }
+
+    pub fn total_writes(&self) -> usize {
+        self.writes * self.users
+    }
 }
 
 #[derive(Debug, Parser)]

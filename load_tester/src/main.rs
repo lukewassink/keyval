@@ -1,5 +1,7 @@
+use std::io::Write;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Instant;
 use std::{fs::OpenOptions, net::TcpStream};
 use thiserror::Error;
 
@@ -47,6 +49,7 @@ fn main() -> Result<(), Error> {
     let mut handles: Vec<JoinHandle<Result<Vec<MessageData>, Error>>> = Vec::new();
 
     println!("Streaming to {}...", address);
+    let start_time = Instant::now();
     for requests in requests_list.into_iter() {
         let mut stream = TcpStream::connect(address)?;
 
@@ -64,12 +67,23 @@ fn main() -> Result<(), Error> {
             }
         }
     }
+    let end_time = Instant::now();
 
-    let file = OpenOptions::new()
+    let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(config.output_path)?;
+        .open(config.output_path.clone())?;
+
+    writeln!(file, "# Total time, total reads, total writes")?;
+    writeln!(
+        file,
+        "# {}, {}, {}",
+        (end_time - start_time).as_micros(),
+        config.total_reads(),
+        config.total_writes()
+    )?;
+
     let mut writer = csv::WriterBuilder::new()
         .has_headers(true)
         .from_writer(file);

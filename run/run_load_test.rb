@@ -16,21 +16,22 @@ db_pref_len = db_preffix.length
 lt_pref_len = lt_preffix.length
 
 root = Pathname.new(__dir__) / '..'
+
 puts root
 testdbs = (root / 'run/dbs').children.map { |path| path.basename.to_s }.select { |file| file.start_with?(db_preffix) }
 loadtest_outputs = (root / 'run/tests').children.map do |path|
   path.basename.to_s
-end.select { |file| file.start_with?(lt_preffix) }
-puts testdbs
-puts loadtest_outputs
-max_db = testdbs.map { |file| file[db_pref_len..].to_i }.max | 0
-max_lt = loadtest_outputs.map { |file| file[lt_pref_len..-5].to_i }.max | 0
+end
+loadtest_outputs = loadtest_outputs.select { |file| file.start_with?(lt_preffix) }
+
+max_db = testdbs.map { |file| file[db_pref_len..].to_i }.max || 0
+max_lt = loadtest_outputs.map { |file| file[lt_pref_len..-5].to_i }.max || 0
 num = ([max_lt, max_db].max + 1).to_s
 
 db_path = root / 'run/dbs' / (db_preffix + num)
 lt_path = root / 'run/tests' / "#{lt_preffix}#{num}.csv"
-db_config_path = root / 'run/config' / db_config
-lt_config_path = root / 'run/config' / lt_config
+db_config_path = root / db_config
+lt_config_path = root / lt_config
 db_bin_path = root
 lt_bin_path = root / 'load_tester/'
 
@@ -82,7 +83,7 @@ puts ''
 puts 'Errors:'
 duck_db_errors_command = <<~COMMAND
   "SELECT status, AVG(round_trip) as avg_time, COUNT(round_trip) as count
-    FROM '#{lt_path}'
+    FROM read_csv('#{lt_path}', comment = '#')
     WHERE status != 'Success'
     GROUP BY status"
 COMMAND
@@ -94,8 +95,18 @@ duck_db_command = <<~COMMAND
       approx_quantile(round_trip, 0.50) as p50,
       approx_quantile(round_trip, 0.95) as p95,
       approx_quantile(round_trip, 0.99) as p99
-  FROM '#{lt_path}'
+  FROM read_csv('#{lt_path}', comment = '#')
   WHERE status = 'Success'
   GROUP BY operation;"
 COMMAND
 system("duckdb -c #{duck_db_command}")
+
+throughput_line = File.foreach(lt_path).drop(1).first
+vals = throughput_line[1..].split(',').map(&:strip).map(&:to_i)
+time, reads, writes = vals
+
+puts ''
+puts "Reads: #{reads}, writes: #{writes}, total: #{reads + writes}"
+puts "Total time: #{format('%.2f', time.to_f / 1000)} ms"
+puts "Throughput: #{format('%.2f', 1000.0 * (reads + writes) / time)} ops/ms"
+puts ''
