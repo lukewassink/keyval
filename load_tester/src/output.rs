@@ -7,7 +7,7 @@ use protocol::{Response, Status};
 pub struct MessageData {
     pub status: protocol::Status,
     pub operation: protocol::Operation,
-    #[serde_as(as = "serde_with::DurationNanoSeconds<u64>")]
+    #[serde_as(as = "serde_with::DurationMicroSeconds<u64>")]
     pub round_trip: Duration,
 }
 

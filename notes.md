@@ -1,17 +1,16 @@
-Storage format:
+# DB testing notes
 
-```
-[Operation - u8][key len - u64][key - utf8][val length - u64][val - utf8]
-```
+## October 20, 2026
 
-Operations:
+users = 4
+writes = 100
+reads = 250
 
-- `PUT`: 0
-- `DELETE`: 1
+┌───────────┬──────────┬───────┬───────┬───────┐
+│ operation │ avg_time │  p50  │  p95  │  p99  │
+│  varchar  │  double  │ int64 │ int64 │ int64 │
+├───────────┼──────────┼───────┼───────┼───────┤
+│ Put       │   323.16 │    26 │   105 │  2333 │
+│ Get       │   34.043 │    23 │    90 │   104 │
+└───────────┴──────────┴───────┴───────┴───────┘
 
-Low level api:
-
-- `parse(&mut file) ->  StorageResponse` used by `parseOffsets` and `read`. delegates to:
-  - `parsePut`
-  - `parseDelete`
-- writeS

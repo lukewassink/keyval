@@ -64,10 +64,11 @@ pub fn run_user(
     let mut data: Vec<MessageData> = Vec::with_capacity(requests.len());
     for (op, request) in requests {
         let send_time = Instant::now();
-        stream.write_all(&request)?;
-        let recipt_time = Instant::now();
 
+        stream.write_all(&request)?;
         let response = Response::decode(stream);
+
+        let recipt_time = Instant::now();
 
         data.push(MessageData::from_message(
             op,
