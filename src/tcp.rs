@@ -9,9 +9,8 @@ use std::io::Read;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::thread::{self};
 use std::time::Duration;
 use thiserror::*;
 
@@ -69,7 +68,6 @@ pub fn handle_requests(
     listener: TcpListener,
     storage: Arc<Mutex<Storage>>,
     quit: Arc<AtomicBool>,
-    send: Sender<JoinHandle<()>>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
         println!("Could not access local address.");
@@ -77,28 +75,29 @@ pub fn handle_requests(
     };
     println!("Listening on {}...\n", local_address);
 
-    for stream in listener.incoming() {
-        if quit.load(std::sync::atomic::Ordering::Relaxed) {
-            return Ok(());
+    thread::scope(|s| {
+        for stream in listener.incoming() {
+            if quit.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
+            let Ok(stream) = stream else {
+                println!("Connection error: {:?}", stream);
+                continue;
+            };
+
+            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(10))) {
+                println!("Error setting stream read timeout: {:?}", e);
+                continue;
+            }
+
+            let storage: Arc<Mutex<Storage>> = storage.clone();
+            let quit = quit.clone();
+            s.spawn(move || {
+                let _ = handle_connection(stream, storage, quit);
+            });
         }
-
-        let Ok(stream) = stream else {
-            println!("Connection error: {:?}", stream);
-            continue;
-        };
-
-        if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(10))) {
-            println!("Error setting stream read timeout: {:?}", e);
-            continue;
-        }
-
-        let storage: Arc<Mutex<Storage>> = storage.clone();
-        let quit = quit.clone();
-        let handle = std::thread::spawn(move || {
-            let _ = handle_connection(stream, storage, quit);
-        });
-        let _ = send.send(handle);
-    }
+    });
 
     Ok(())
 }

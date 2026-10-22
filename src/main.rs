@@ -8,9 +8,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
     },
-    thread::JoinHandle,
 };
 
 use thiserror::Error;
@@ -47,7 +45,6 @@ fn main() -> Result<(), Error> {
     let storage = Arc::new(Mutex::new(storage));
 
     let quit = Arc::new(AtomicBool::new(false));
-    let (send, rcv): (Sender<JoinHandle<()>>, Receiver<JoinHandle<()>>) = mpsc::channel();
     {
         let quit = quit.clone();
         ctrlc::set_handler(move || {
@@ -67,15 +64,9 @@ fn main() -> Result<(), Error> {
             }
             CommandMode::Tcp => {
                 let listener = create_listener(config.socket_address).unwrap();
-                tcp::handle_requests(listener, storage, quit, send).unwrap();
+                tcp::handle_requests(listener, storage, quit).unwrap();
             }
         };
-    }
-
-    for handle in rcv {
-        if let Err(e) = handle.join() {
-            println!("Could not join tcp thread: {:?}", e);
-        }
     }
 
     storage.lock().unwrap().quit()?;
