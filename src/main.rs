@@ -3,6 +3,16 @@ mod repl;
 mod storage;
 mod tcp;
 
+use std::{
+    net::{Shutdown, TcpStream},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+    },
+    thread::JoinHandle,
+};
+
 use thiserror::Error;
 
 use crate::{
@@ -33,27 +43,43 @@ fn main() -> Result<(), Error> {
     let config = build_config()?;
 
     // Initialize database.
-    let mut storage = Storage::initialize(&config.database_path)?;
+    let storage = Storage::initialize(&config.database_path)?;
+    let storage = Arc::new(Mutex::new(storage));
 
-    // Handle exit gracefully.
-    // let running = Arc::new(AtomicBool::new(true));
-    // let r = running.clone();
-    // ctrlc::set_handler(move || r.store(false, Ordering::SeqCst))?;
+    let quit = Arc::new(AtomicBool::new(false));
+    let (send, rcv): (Sender<JoinHandle<()>>, Receiver<JoinHandle<()>>) = mpsc::channel();
+    {
+        let quit = quit.clone();
+        ctrlc::set_handler(move || {
+            quit.store(true, Ordering::Relaxed);
+            let stream = TcpStream::connect(config.socket_address).unwrap();
+            stream.shutdown(Shutdown::Both).unwrap();
+        })?;
+    }
 
     // Handle requests.
-    match config.command_mode {
-        CommandMode::Repl => {
-            run_repl(&mut storage)?;
-        }
-        CommandMode::Tcp => {
-            let listener = create_listener(config.socket_address)?;
-            tcp::handle_requests(listener, &mut storage)?;
+    {
+        let storage = storage.clone();
+        match config.command_mode {
+            CommandMode::Repl => {
+                let mut storage = storage.lock().unwrap();
+                run_repl(&mut storage).unwrap();
+            }
+            CommandMode::Tcp => {
+                let listener = create_listener(config.socket_address).unwrap();
+                tcp::handle_requests(listener, storage, quit, send).unwrap();
+            }
+        };
+    }
+
+    for handle in rcv {
+        if let Err(e) = handle.join() {
+            println!("Could not join tcp thread: {:?}", e);
         }
     }
 
-    // Shut down.
-    storage.quit()?;
-    println!("Data persisted. Shutting down...");
+    storage.lock().unwrap().quit()?;
+    println!("\n\nData saved to disk. Exiting...");
 
     Ok(())
 }

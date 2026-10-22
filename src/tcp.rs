@@ -7,7 +7,12 @@ use protocol::{
 };
 use std::io::Read;
 use std::io::Write;
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 use thiserror::*;
 
 use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
@@ -28,9 +33,43 @@ pub fn create_listener(socket_addr: SocketAddr) -> std::io::Result<TcpListener> 
     TcpListener::bind(socket_addr)
 }
 
+fn handle_connection(
+    mut stream: TcpStream,
+    storage: Arc<Mutex<Storage>>,
+    quit: Arc<AtomicBool>,
+) -> Result<(), TcpHandlerError> {
+    let address = stream.peer_addr()?;
+
+    loop {
+        if quit.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let mut op_buf: [u8; 1] = [0; 1];
+        if stream.read(&mut op_buf)? == 0 {
+            println!("Connection terminated by {}", address);
+            return Ok(());
+        }
+
+        let mut storage = storage.lock().unwrap();
+
+        match Operation::decode(op_buf[0]) {
+            Ok(Put) => handle_put_request(&mut stream, &mut storage)?,
+            Ok(Get) => handle_get_request(&mut stream, &mut storage)?,
+            Ok(Delete) => handle_delete_request(&mut stream, &mut storage)?,
+            Ok(Contains) => handle_contains_request(&mut stream, &mut storage)?,
+            // Rather than dropping invalid requests silently, consider an
+            // InvalidRequestResponse message.
+            Err(_) => {}
+        }
+    }
+}
+
 pub fn handle_requests(
     listener: TcpListener,
-    storage: &mut Storage,
+    storage: Arc<Mutex<Storage>>,
+    quit: Arc<AtomicBool>,
+    send: Sender<JoinHandle<()>>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
         println!("Could not access local address.");
@@ -39,42 +78,28 @@ pub fn handle_requests(
     println!("Listening on {}...\n", local_address);
 
     for stream in listener.incoming() {
-        let Ok(mut stream) = stream else {
-            break;
-        };
-
-        let Ok(address) = stream.peer_addr() else {
-            break;
-        };
-        // println!("Connected to {:?}", address);
-
-        loop {
-            let mut op_buf: [u8; 1] = [0; 1];
-            match stream.read(&mut op_buf) {
-                Ok(0) => {
-                    // println!("Connection terminated by {}", address);
-                    break;
-                }
-                Err(e) => {
-                    println!(
-                        "Error in connection with {}, {}\nConnection terminated.",
-                        address, e
-                    );
-                    break;
-                }
-                Ok(_) => match Operation::decode(op_buf[0]) {
-                    // How to handle errors here? Maybe log them in some way
-                    Ok(Put) => handle_put_request(&mut stream, storage)?,
-                    Ok(Get) => handle_get_request(&mut stream, storage)?,
-                    Ok(Delete) => handle_delete_request(&mut stream, storage)?,
-                    Ok(Contains) => handle_contains_request(&mut stream, storage)?,
-                    // Rather than dropping invalid requests silently, consider an
-                    // InvalidRequestResponse message.
-                    Err(_) => {}
-                },
-            }
+        if quit.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
         }
+
+        let Ok(stream) = stream else {
+            println!("Connection error: {:?}", stream);
+            continue;
+        };
+
+        if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(10))) {
+            println!("Error setting stream read timeout: {:?}", e);
+            continue;
+        }
+
+        let storage: Arc<Mutex<Storage>> = storage.clone();
+        let quit = quit.clone();
+        let handle = std::thread::spawn(move || {
+            let _ = handle_connection(stream, storage, quit);
+        });
+        let _ = send.send(handle);
     }
+
     Ok(())
 }
 

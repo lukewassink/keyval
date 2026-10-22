@@ -184,7 +184,8 @@ impl Storage {
     }
 
     pub fn quit(&mut self) -> Result<(), StorageError> {
-        self.file.flush().map_err(Into::into)
+        self.file.flush()?;
+        self.file.sync_all().map_err(Into::into)
     }
 
     pub fn write(&mut self, request: &WriteRequest) -> std::io::Result<()> {
