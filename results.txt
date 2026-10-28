@@ -1,0 +1,133 @@
+# DB testing notes
+
+## October 20, 2026
+
+users = 4
+writes = 100
+reads = 250
+
+┌───────────┬──────────┬───────┬───────┬───────┐
+│ operation │ avg_time │  p50  │  p95  │  p99  │
+│  varchar  │  double  │ int64 │ int64 │ int64 │
+├───────────┼──────────┼───────┼───────┼───────┤
+│ Put       │   323.16 │    26 │   105 │  2333 │
+│ Get       │   34.043 │    23 │    90 │   104 │
+└───────────┴──────────┴───────┴───────┴───────┘
+
+## October 22, 2026
+
+Errors:
+┌─────────┬──────────┬───────┐
+│ status  │ avg_time │ count │
+│ varchar │  double  │ int64 │
+└─────────┴──────────┴───────┘
+            0 rows
+Successful requests:
+┌───────────┬──────────┬───────┬───────┬───────┐
+│ operation │ avg_time │  p50  │  p95  │  p99  │
+│  varchar  │  double  │ int64 │ int64 │ int64 │
+├───────────┼──────────┼───────┼───────┼───────┤
+│ Get       │  55.3473 │    51 │   104 │   136 │
+│ Put       │ 57.14025 │    53 │   104 │   139 │
+└───────────┴──────────┴───────┴───────┴───────┘
+
+Reads: 10000, writes: 4000, total: 14000
+Total time: 197.59 ms
+Throughput: 70.85 ops/ms
+
+## October 26, 2026
+
+Setting up load test...
+
+/Users/lwassink/bin/keyval
+Database config:  /Users/lwassink/bin/keyval/run/config/db_config.toml
+Load test config: /Users/lwassink/bin/keyval/run/config/lt_config.toml
+Database:         /Users/lwassink/bin/keyval/run/dbs/testdb_3
+Load test output: /Users/lwassink/bin/keyval/run/tests/loadtest_3.csv
+
+Listening on 0.0.0.0:49153...
+
+
+Database running...
+
+Connection terminated by 127.0.0.1:58575
+Connection terminated by 127.0.0.1:58577
+Connection terminated by 127.0.0.1:58574
+Connection terminated by 127.0.0.1:58576
+
+Test finished...
+
+
+=================
+Load test results
+=================
+
+Errors:
+┌─────────┬──────────┬───────┐
+│ status  │ avg_time │ count │
+│ varchar │  double  │ int64 │
+└─────────┴──────────┴───────┘
+            0 rows          
+Successful requests:
+┌───────────┬──────────┬───────┬───────┬───────┐
+│ operation │ avg_time │  p50  │  p95  │  p99  │
+│  varchar  │  double  │ int64 │ int64 │ int64 │
+├───────────┼──────────┼───────┼───────┼───────┤
+│ Put       │   61.625 │    54 │   118 │   131 │
+│ Get       │ 47.81775 │    48 │    81 │   111 │
+└───────────┴──────────┴───────┴───────┴───────┘
+
+
+Data saved to disk. Exiting...
+
+Reads: 8000, writes: 40, total: 8040
+Total time: 97.80 ms
+Throughput: 82.20 ops/ms
+
+
+Setting up load test...
+
+/Users/lwassink/bin/keyval
+Database config:  /Users/lwassink/bin/keyval/run/config/db_config.toml
+Load test config: /Users/lwassink/bin/keyval/run/config/lt_config.toml
+Database:         /Users/lwassink/bin/keyval/run/dbs/testdb_4
+Load test output: /Users/lwassink/bin/keyval/run/tests/loadtest_4.csv
+
+Listening on 0.0.0.0:49153...
+
+
+Database running...
+
+Connection terminated by 127.0.0.1:58581
+Connection terminated by 127.0.0.1:58582
+Connection terminated by 127.0.0.1:58580
+Connection terminated by 127.0.0.1:58579
+
+Test finished...
+
+
+=================
+Load test results
+=================
+
+Errors:
+┌─────────┬──────────┬───────┐
+│ status  │ avg_time │ count │
+│ varchar │  double  │ int64 │
+└─────────┴──────────┴───────┘
+            0 rows          
+Successful requests:
+┌───────────┬──────────┬───────┬───────┬───────┐
+│ operation │ avg_time │  p50  │  p95  │  p99  │
+│  varchar  │  double  │ int64 │ int64 │ int64 │
+├───────────┼──────────┼───────┼───────┼───────┤
+│ Put       │    62.22 │    56 │   112 │   160 │
+└───────────┴──────────┴───────┴───────┴───────┘
+
+
+Data saved to disk. Exiting...
+
+Reads: 0, writes: 8000, total: 8000
+Total time: 125.76 ms
+Throughput: 63.61 ops/ms
+

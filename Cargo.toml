@@ -9,6 +9,7 @@ debug = true
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+crc32fast = "1.5.3"
 ctrlc = "3.5.2"
 easy-repl = "0.2.1"
 protocol = { path = "./protocol" }

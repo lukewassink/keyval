@@ -1,6 +1,6 @@
 users = 4
-writes = 1000
-reads = 2500
+writes = 2000
+reads = 0
 db_address = "127.0.0.1:49153"
 output_path = "../run/loadtest_5.csv"
 min_val_length = 10
