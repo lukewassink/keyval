@@ -18,8 +18,6 @@ pub enum DecodingError {
     #[error("Operation number {0} does not correspond to a valid operation code.")]
     InvalidOperation(u8),
     #[error("{0}")]
-    InvalidUTTF8(#[from] std::string::FromUtf8Error),
-    #[error("{0}")]
     IOError(#[from] std::io::Error),
     #[error("Byte {0} is not a valid boolean.")]
     InvalidBoolean(u8),
@@ -70,13 +68,13 @@ impl Response {
 
 #[derive(PartialEq, Debug)]
 pub struct GetRequest {
-    pub key: String,
+    pub key: Vec<u8>,
 }
 
 #[derive(PartialEq, Debug)]
 pub struct GetResponse {
     pub status: Status,
-    pub val: String,
+    pub val: Vec<u8>,
 }
 
 impl GetResponse {
@@ -90,8 +88,8 @@ impl GetResponse {
 
 #[derive(PartialEq, Debug)]
 pub struct PutRequest {
-    pub key: String,
-    pub val: String,
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -101,7 +99,7 @@ pub struct PutResponse {
 
 #[derive(PartialEq, Debug)]
 pub struct DeleteRequest {
-    pub key: String,
+    pub key: Vec<u8>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -111,7 +109,7 @@ pub struct DeleteResponse {
 
 #[derive(PartialEq, Debug)]
 pub struct ContainsRequest {
-    pub key: String,
+    pub key: Vec<u8>,
 }
 
 #[derive(PartialEq, Debug)]

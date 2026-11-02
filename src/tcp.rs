@@ -5,8 +5,8 @@ use protocol::{
     ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
     PutRequest, PutResponse,
 };
-use std::io::Read;
 use std::io::Write;
+use std::io::{Read, Seek};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -34,7 +34,7 @@ pub fn create_listener(socket_addr: SocketAddr) -> std::io::Result<TcpListener> 
 
 fn handle_connection(
     mut stream: TcpStream,
-    storage: Arc<Mutex<Storage>>,
+    storage: Arc<Mutex<Storage<impl Read + Write + Seek>>>,
     quit: Arc<AtomicBool>,
 ) -> Result<(), TcpHandlerError> {
     let address = stream.peer_addr()?;
@@ -64,9 +64,9 @@ fn handle_connection(
     }
 }
 
-pub fn handle_requests(
+pub fn handle_requests<T: Read + Write + Seek + Send>(
     listener: TcpListener,
-    storage: Arc<Mutex<Storage>>,
+    storage: Arc<Mutex<Storage<T>>>,
     quit: Arc<AtomicBool>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
@@ -91,7 +91,7 @@ pub fn handle_requests(
                 continue;
             }
 
-            let storage: Arc<Mutex<Storage>> = storage.clone();
+            let storage: Arc<Mutex<Storage<T>>> = storage.clone();
             let quit = quit.clone();
             s.spawn(move || {
                 let _ = handle_connection(stream, storage, quit);
@@ -104,7 +104,7 @@ pub fn handle_requests(
 
 fn handle_put_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage,
+    storage: &mut Storage<impl Read + Write + Seek>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(request) = PutRequest::decode(&mut stream) else {
         let response = PutResponse {
@@ -133,7 +133,7 @@ fn handle_put_request(
 
 fn handle_get_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage,
+    storage: &mut Storage<impl Read + Write + Seek>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(request) = GetRequest::decode(&mut stream) else {
         let response = GetResponse::failed(InvalidRequest);
@@ -157,7 +157,7 @@ fn handle_get_request(
 
 fn handle_delete_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage,
+    storage: &mut Storage<impl Read + Write + Seek>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(request) = DeleteRequest::decode(&mut stream) else {
         let response = DeleteResponse {
@@ -183,7 +183,7 @@ fn handle_delete_request(
 
 fn handle_contains_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage,
+    storage: &mut Storage<impl Read + Write + Seek>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(request) = ContainsRequest::decode(&mut stream) else {
         let response = ContainsResponse::failed(InvalidRequest);

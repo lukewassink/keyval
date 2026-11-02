@@ -11,6 +11,7 @@ debug = true
 clap = { version = "4.6.7", features = ["derive"] }
 crc32fast = "1.5.3"
 ctrlc = "3.5.2"
+derive-new = "0.7.0"
 easy-repl = "0.2.1"
 protocol = { path = "./protocol" }
 serde = { version = "1.0.229", features = ["derive"] }

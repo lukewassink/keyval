@@ -129,10 +129,10 @@ fn decode_u64(reader: &mut impl Read) -> Result<u64, DecodingError> {
     Ok(u64::from_be_bytes(header))
 }
 
-fn decode_string(reader: &mut impl Read, len: u64) -> Result<String, DecodingError> {
+fn read_bytes(reader: &mut impl Read, len: u64) -> Result<Vec<u8>, DecodingError> {
     let mut buf: Vec<u8> = vec![0; len as usize];
     reader.read_exact(&mut buf)?;
-    String::from_utf8(buf).map_err(Into::into)
+    Ok(buf)
 }
 
 impl Message for GetRequest {
@@ -140,13 +140,13 @@ impl Message for GetRequest {
         let mut buf: Vec<u8> = Vec::with_capacity(self.key.len() + 9);
         buf.push(Get.encode());
         buf.extend_from_slice(&self.key.len().to_be_bytes());
-        buf.extend_from_slice(self.key.as_bytes());
+        buf.extend_from_slice(&self.key);
         Ok(buf)
     }
 
     fn decode(reader: &mut impl Read) -> Result<GetRequest, DecodingError> {
         let key_len = decode_u64(reader)?;
-        let key = decode_string(reader, key_len)?;
+        let key = read_bytes(reader, key_len)?;
         Ok(GetRequest { key })
     }
 }
@@ -164,7 +164,7 @@ impl Message for GetResponse {
         buf.push(Get.encode());
         buf.push(self.status.encode());
         buf.extend_from_slice(&self.val.len().to_be_bytes());
-        buf.extend_from_slice(self.val.as_bytes());
+        buf.extend_from_slice(&self.val);
 
         Ok(buf)
     }
@@ -172,7 +172,7 @@ impl Message for GetResponse {
     fn decode(reader: &mut impl Read) -> Result<GetResponse, DecodingError> {
         let status = decode_status(reader)?;
         let val_len = decode_u64(reader)?;
-        let val = decode_string(reader, val_len)?;
+        let val = read_bytes(reader, val_len)?;
         Ok(GetResponse { status, val })
     }
 }
@@ -183,16 +183,16 @@ impl Message for PutRequest {
         buf.push(Put.encode());
         buf.extend_from_slice(&self.key.len().to_be_bytes());
         buf.extend_from_slice(&self.val.len().to_be_bytes());
-        buf.extend_from_slice(self.key.as_bytes());
-        buf.extend_from_slice(self.val.as_bytes());
+        buf.extend_from_slice(&self.key);
+        buf.extend_from_slice(&self.val);
         Ok(buf)
     }
 
     fn decode(reader: &mut impl Read) -> Result<PutRequest, DecodingError> {
         let key_len = decode_u64(reader)?;
         let val_len = decode_u64(reader)?;
-        let key = decode_string(reader, key_len)?;
-        let val = decode_string(reader, val_len)?;
+        let key = read_bytes(reader, key_len)?;
+        let val = read_bytes(reader, val_len)?;
         Ok(PutRequest { key, val })
     }
 }
@@ -217,13 +217,13 @@ impl Message for DeleteRequest {
         let mut buf: Vec<u8> = Vec::with_capacity(self.key.len() + 9);
         buf.push(Delete.encode());
         buf.extend_from_slice(&self.key.len().to_be_bytes());
-        buf.extend_from_slice(self.key.as_bytes());
+        buf.extend_from_slice(&self.key);
         Ok(buf)
     }
 
     fn decode(reader: &mut impl Read) -> Result<DeleteRequest, DecodingError> {
         let key_len = decode_u64(reader)?;
-        let key = decode_string(reader, key_len)?;
+        let key = read_bytes(reader, key_len)?;
         Ok(DeleteRequest { key })
     }
 }
@@ -248,13 +248,13 @@ impl Message for ContainsRequest {
         let mut buf: Vec<u8> = Vec::with_capacity(self.key.len() + 9);
         buf.push(Contains.encode());
         buf.extend_from_slice(&self.key.len().to_be_bytes());
-        buf.extend_from_slice(self.key.as_bytes());
+        buf.extend_from_slice(&self.key);
         Ok(buf)
     }
 
     fn decode(reader: &mut impl Read) -> Result<ContainsRequest, DecodingError> {
         let key_len = decode_u64(reader)?;
-        let key = decode_string(reader, key_len)?;
+        let key = read_bytes(reader, key_len)?;
         Ok(ContainsRequest { key })
     }
 }

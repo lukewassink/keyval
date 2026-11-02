@@ -10,17 +10,16 @@ use std::time::Instant;
 
 pub type TestRequests = Vec<(Operation, Vec<u8>)>;
 
-fn random_string(range: &Range<usize>) -> Result<String, Error> {
+fn random_bytes(range: &Range<usize>) -> Result<Vec<u8>, Error> {
     let mut rng = rand::rng();
     let len: usize = range.clone().sample_single(&mut rng)?;
 
-    let s = String::from_utf8(
-        rng.sample_iter(rand::distr::Alphanumeric)
-            .take(len)
-            .collect(),
-    )?;
+    let b = rng
+        .sample_iter(rand::distr::Alphanumeric)
+        .take(len)
+        .collect();
 
-    Ok(s)
+    Ok(b)
 }
 
 pub fn generate_requests(config: &Config, user_id: usize) -> Result<TestRequests, Error> {
@@ -40,15 +39,18 @@ pub fn generate_requests(config: &Config, user_id: usize) -> Result<TestRequests
         if pick < writes || requests.is_empty() {
             writes -= 1;
             let request = PutRequest {
-                key: next_key.to_string(),
-                val: random_string(&key_size_range)?,
+                key: next_key.to_be_bytes().into(),
+                val: random_bytes(&key_size_range)?,
             };
             next_key += 1;
             requests.push((Operation::Put, request.encode()?));
         } else {
             reads -= 1;
             let request = GetRequest {
-                key: (key_start..next_key).sample_single(&mut rng)?.to_string(),
+                key: (key_start..next_key)
+                    .sample_single(&mut rng)?
+                    .to_be_bytes()
+                    .into(),
             };
             requests.push((Operation::Get, request.encode()?));
         }

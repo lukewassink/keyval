@@ -4,6 +4,7 @@ mod storage;
 mod tcp;
 
 use std::{
+    fs::File,
     net::{Shutdown, TcpStream},
     sync::{
         Arc, Mutex,
@@ -41,7 +42,7 @@ fn main() -> Result<(), Error> {
     let config = build_config()?;
 
     // Initialize database.
-    let storage = Storage::initialize(&config.database_path)?;
+    let storage = Storage::<File>::initialize(&config.database_path)?;
     let storage = Arc::new(Mutex::new(storage));
 
     let quit = Arc::new(AtomicBool::new(false));

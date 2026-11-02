@@ -1,5 +1,5 @@
 use easy_repl::{CommandStatus, Repl, command};
-use std::{cell::RefCell, cmp::min};
+use std::{cell::RefCell, cmp::min, fs::File};
 use storage::Storage;
 use thiserror::Error;
 
@@ -38,7 +38,7 @@ impl From<easy_repl::repl::BuilderError> for ReplError {
     }
 }
 
-pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
+pub fn run_repl(storage: &mut Storage<File>) -> Result<(), ReplError> {
     let storage = &RefCell::new(storage);
 
     let mut repl = Repl::builder()
@@ -47,7 +47,7 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
             command! {
                 "Put the pair (key, val)",
                 (key: String, val: String) => |key: String, val: String| {
-                    match storage.borrow_mut().write(&WriteRequest{key: &key, val: &val}) {
+                    match storage.borrow_mut().write(&WriteRequest{key: key.as_bytes(), val: val.as_bytes()}) {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Put failed with error {:?}", e)}
                     }
@@ -59,8 +59,8 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
             command! {
                 "Get the value for <key>",
                 (key: String) => |key: String| {
-                    match storage.borrow_mut().read(&ReadRequest{key: &key}) {
-                        Ok(response) => { println!("val: {}", response.val); }
+                    match storage.borrow_mut().read(&ReadRequest{key: key.as_bytes()}) {
+                        Ok(response) => { println!("val: {}", String::from_utf8_lossy(&response.val)); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
                     Ok(CommandStatus::Done)
@@ -71,7 +71,7 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
             command! {
                 "Delete the entry for <key>",
                 (key: String) => |key: String| {
-                    match storage.borrow_mut().delete(&DeleteRequest{key: &key}) {
+                    match storage.borrow_mut().delete(&DeleteRequest{key: key.as_bytes()}) {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
@@ -83,7 +83,7 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
             command! {
                 "Check if there is an entry for <key>",
                 (key: String) => |key: String| {
-                    let c = storage.borrow_mut().contains(&ContainsRequest{key: &key});
+                    let c = storage.borrow_mut().contains(&ContainsRequest{key: key.as_bytes()});
                     println!("contains: {}", c);
                     Ok(CommandStatus::Done)
             }},
@@ -95,7 +95,8 @@ pub fn run_repl(storage: &mut Storage) -> Result<(), ReplError> {
                 () => || {
                     let keys = storage.borrow().keys();
                     let n = min(100, keys.len());
-                    println!("keys: {}\n==========\n{}", keys.len(), storage.borrow().keys()[..n].join("\n"));
+                    println!("keys: {}\n==========\n{}", keys.len(), keys.iter()
+                        .take(n).map(|k| String::from_utf8_lossy(k).into()).collect::<Vec<String>>().join("\n"));
                     Ok(CommandStatus::Done)
             }},
         )

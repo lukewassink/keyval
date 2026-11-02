@@ -43,7 +43,7 @@ puts ''
 
 # Start KeyVal
 
-`cd #{db_bin_path}; cargo build --profile profiling`
+# `cd #{db_bin_path}; cargo build --profile profiling`
 
 Thread.new do
   samply_cmd = ARGV.include?('-s') ? 'samply record' : ''

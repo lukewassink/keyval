@@ -19,7 +19,7 @@ use crate::message::Message;
 #[test]
 fn get_request() -> Result<(), Box<dyn Error>> {
     let request = GetRequest {
-        key: "testkey".to_string(),
+        key: "testkey".as_bytes().into(),
     };
 
     let mut buffer: Vec<u8> = vec![];
@@ -38,7 +38,7 @@ fn get_request() -> Result<(), Box<dyn Error>> {
 fn get_response() -> Result<(), Box<dyn Error>> {
     let response = GetResponse {
         status: Success,
-        val: "testvalue".to_string(),
+        val: "testvalue".as_bytes().into(),
     };
 
     let mut buffer: Vec<u8> = vec![];
@@ -56,8 +56,8 @@ fn get_response() -> Result<(), Box<dyn Error>> {
 #[test]
 fn put_request() -> Result<(), Box<dyn Error>> {
     let request = PutRequest {
-        key: "here".to_string(),
-        val: "there and everywhere".to_string(),
+        key: "here".as_bytes().into(),
+        val: "there and everywhere".as_bytes().into(),
     };
 
     let mut buffer: Vec<u8> = vec![];
@@ -93,7 +93,7 @@ fn put_response() -> Result<(), Box<dyn Error>> {
 #[test]
 fn delete_request() -> Result<(), Box<dyn Error>> {
     let request = DeleteRequest {
-        key: "testkey".to_string(),
+        key: "testkey".as_bytes().into(),
     };
 
     let mut buffer: Vec<u8> = vec![];
@@ -127,7 +127,7 @@ fn delete_response() -> Result<(), Box<dyn Error>> {
 #[test]
 fn contains_request() -> Result<(), Box<dyn Error>> {
     let request = ContainsRequest {
-        key: "testkey".to_string(),
+        key: "testkey".as_bytes().into(),
     };
 
     let mut buffer: Vec<u8> = vec![];
