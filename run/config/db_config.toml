@@ -1,3 +1,7 @@
 database_path = "run/testdb5"
 command_mode = "Tcp"
 socket_address = "0.0.0.0:49153"
+file_size_mb = 64
+db_size_mb = 1024
+max_key_size_kb = 2
+max_value_size_kb = 128

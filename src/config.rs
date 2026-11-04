@@ -6,9 +6,26 @@ pub struct Config {
     /// Path to the database file.
     pub database_path: String,
 
+    /// Whether to with the repl or listen via the TCP interface.
     pub command_mode: CommandMode,
 
+    /// The TCP socket address for the database.
     pub socket_address: SocketAddr,
+
+    /// The file size for an individual file.
+    pub file_size_mb: u64,
+
+    /// The maximum size for the entire database.
+    /// Writes that would exceed this size will return an error.
+    pub max_db_size_mb: u64,
+
+    /// The maximum size for a key.
+    /// Writes with keys that would exceed this size will return an error.
+    pub max_key_size_kb: u64,
+    ///
+    /// The maximum size for the a value.
+    /// Writes with values that would exceed this size will return an error.
+    pub max_value_size_kb: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
