@@ -47,6 +47,7 @@ fn main() -> Result<(), Error> {
     }
 
     let mut handles: Vec<JoinHandle<Result<Vec<MessageData>, Error>>> = Vec::new();
+    let mut test_data: Vec<MessageData> = Vec::with_capacity(config.total_requests());
 
     println!("Streaming to {}...", address);
     let start_time = Instant::now();
@@ -56,7 +57,6 @@ fn main() -> Result<(), Error> {
         handles.push(thread::spawn(move || run_user(&mut stream, requests)));
     }
 
-    let mut test_data: Vec<MessageData> = Vec::with_capacity(config.total_requests());
     for (id, handle) in handles.into_iter().enumerate() {
         match handle.join().unwrap() {
             Err(e) => {

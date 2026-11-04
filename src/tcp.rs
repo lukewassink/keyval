@@ -86,7 +86,7 @@ pub fn handle_requests<T: Read + Write + Seek + Send>(
                 continue;
             };
 
-            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(10))) {
+            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(1000))) {
                 println!("Error setting stream read timeout: {:?}", e);
                 continue;
             }

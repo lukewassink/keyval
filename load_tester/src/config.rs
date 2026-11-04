@@ -7,19 +7,25 @@ use std::net::SocketAddr;
 pub struct Config {
     /// Distinct users to simulate in parallel.
     pub users: usize,
+
     /// Number of distinct key/val pairs each user should write.
     /// Bear in mind that kv pairs are pregenerated and stored in memory to save rsources while
     /// running.
     pub writes: usize,
+
     /// Number of read requests each thread should make for a valid key.
     /// If <writes> is zero, this number must be zero too.
     pub reads: usize,
+
     /// Database address to send requests to.
     pub db_address: SocketAddr,
+
     /// The file path to write the output data to.
     pub output_path: String,
+
     /// Minimum length of a random value.
     pub min_val_length: usize,
+
     /// Maximum length of a random value.
     pub max_val_length: usize,
 }
