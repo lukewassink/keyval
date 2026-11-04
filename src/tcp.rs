@@ -91,6 +91,11 @@ pub fn handle_requests<T: Read + Write + Seek + Send>(
                 continue;
             }
 
+            if let Err(e) = stream.set_nodelay(true) {
+                println!("Error setting nodelay: {:?}", e);
+                continue;
+            }
+
             let storage: Arc<Mutex<Storage<T>>> = storage.clone();
             let quit = quit.clone();
             s.spawn(move || {

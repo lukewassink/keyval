@@ -53,6 +53,7 @@ fn main() -> Result<(), Error> {
     let start_time = Instant::now();
     for requests in requests_list.into_iter() {
         let mut stream = TcpStream::connect(address)?;
+        stream.set_nodelay(true)?; // Turn off Nagle's algorithm.
 
         handles.push(thread::spawn(move || run_user(&mut stream, requests)));
     }

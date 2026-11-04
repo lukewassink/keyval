@@ -231,4 +231,3 @@ Data saved to disk. Exiting...
 Reads: 200, writes: 80, total: 280
 Total time: 10.00 ms
 Throughput: 28.01 ops/ms
-
