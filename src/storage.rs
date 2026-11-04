@@ -254,7 +254,6 @@ where
         self.keydir.insert(request.key.into(), self.next_offset);
         self.next_offset += to_write.len() as u64;
 
-        self.file.flush()?;
         Ok(())
     }
 
@@ -266,7 +265,6 @@ where
         self.keydir.remove(request.key);
         self.next_offset += to_write.len() as u64;
 
-        self.file.flush()?;
         Ok(())
     }
 
