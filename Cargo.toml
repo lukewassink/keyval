@@ -8,12 +8,14 @@ inherits = "release"
 debug = true
 
 [dependencies]
+boxcar = "0.2.14"
 clap = { version = "4.6.7", features = ["derive"] }
 crc32fast = "1.5.3"
 ctrlc = "3.5.2"
 derive-new = "0.7.0"
 easy-repl = "0.2.1"
 protocol = { path = "./protocol" }
+regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.1.8"

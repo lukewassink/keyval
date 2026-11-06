@@ -1,6 +1,7 @@
 mod config;
 mod repl;
 mod storage;
+mod storage_new;
 mod tcp;
 
 use std::{
