@@ -169,8 +169,12 @@ impl Storage {
             .map_err(Into::into)
     }
 
-    fn set_read_only(file: &File) -> Result<(), StorageError> {
-        file.metadata()?.permissions().set_readonly(true);
+    fn set_read_only(storage_instance: &StorageInstance) -> Result<(), StorageError> {
+        storage_instance
+            .file
+            .metadata()?
+            .permissions()
+            .set_readonly(true);
         Ok(())
     }
 
@@ -188,6 +192,7 @@ impl Storage {
             return Err(InvalidDBPath(path.into()));
         }
 
+        // Read existing files.
         let mut num_to_file: BTreeMap<u32, StorageInstance> = BTreeMap::new();
         for file in fs::read_dir(path)? {
             let file = file?;
@@ -235,6 +240,8 @@ impl Storage {
 
         // Create a new file if current head file would overflow.
         if self.head_file().unwrap().would_exceed_capacity(bytes) {
+            Self::set_read_only(self.head_file().unwrap())?;
+
             let next_file_name = format!("{}{:05}", Self::ROOT_FILE_NAME, self.files.count());
             let next_file_path = format!("{}{}", self.config.database_path, next_file_name);
             let next_file = Self::open_file(&next_file_path, true)?;
