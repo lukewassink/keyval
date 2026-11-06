@@ -110,7 +110,7 @@ impl StorageInstance {
 
     fn parse_u64(bytes: &[u8], offset: u64) -> u64 {
         let offset = offset as usize;
-        u64::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap())
+        u64::from_be_bytes(bytes[offset..offset + 8].try_into().unwrap())
     }
 
     fn read(&self, offset: u64, size: u64) -> Result<ReadResponse, StorageError> {
@@ -123,7 +123,7 @@ impl StorageInstance {
             return Err(Corupted(self.filename.clone(), offset, size));
         }
 
-        let timestamp = Self::parse_u64(&buffer, offset + 4);
+        let timestamp = Self::parse_u64(&buffer, 4);
 
         Ok(ReadResponse {
             bytes: buffer[Self::HEADER_SIZE as usize..].into(),
@@ -229,7 +229,7 @@ impl Storage {
 
     pub fn append(&self, bytes: &[u8]) -> Result<AppendResponse, StorageError> {
         // Check if max db size would be exceeded.
-        if bytes.len() as u64 + StorageInstance::HEADER_SIZE + self.size > 0 {
+        if bytes.len() as u64 + StorageInstance::HEADER_SIZE + self.size > self.max_bytes {
             return Err(StorageCapacityExceeded(self.max_bytes, bytes.len() as u64));
         }
 
@@ -263,6 +263,9 @@ impl Storage {
             return Err(InvalidIndex(file_idx));
         }
 
-        self.head_file().unwrap().read(offset, size)
+        self.files
+            .get(file_idx as usize)
+            .unwrap()
+            .read(offset, size)
     }
 }
