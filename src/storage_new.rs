@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs::File, os::unix::fs::FileExt, time::SystemTime};
 use thiserror::Error;
 
@@ -145,8 +144,7 @@ impl StorageInstance {
 struct Storage {
     files: boxcar::Vec<StorageInstance>,
     config: Config,
-    // In bytes.
-    size: AtomicU64,
+    size: Mutex<u64>,
     max_bytes: u64,
 }
 
@@ -231,13 +229,14 @@ impl Storage {
             config,
             files,
             max_bytes,
-            size: AtomicU64::new(size),
+            size: Mutex::new(size),
         })
     }
 
     pub fn append(&self, bytes: &[u8]) -> Result<AppendResponse, StorageError> {
         // Chec if max db size would be exceeded.
-        if StorageInstance::append_len(bytes) + self.size.load(Ordering::Acquire) > self.max_bytes {
+        let mut size = self.size.lock().unwrap();
+        if StorageInstance::append_len(bytes) + *size > self.max_bytes {
             return Err(StorageCapacityExceeded(self.max_bytes, bytes.len() as u64));
         }
 
@@ -257,8 +256,7 @@ impl Storage {
 
         // Write the bytes.
         let (offset, timestamp) = self.head_file().unwrap().append(bytes)?;
-        self.size
-            .fetch_add(StorageInstance::append_len(bytes), Ordering::Release);
+        *size += StorageInstance::append_len(bytes);
         Ok(AppendResponse {
             file_index: self.files.count() as u32 - 1,
             offset,
