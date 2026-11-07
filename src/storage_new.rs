@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs::File, os::unix::fs::FileExt, time::SystemTime};
 use thiserror::Error;
 
@@ -47,6 +48,7 @@ pub struct ReadResponse {
 pub struct AppendResponse {
     file_index: u32,
     offset: u64,
+    timestamp: u64,
 }
 
 impl StorageInstance {
@@ -68,16 +70,20 @@ impl StorageInstance {
         Ok(StorageInstance {
             file,
             filename,
-            capacity: config.file_size_mb * 2u64.pow(20),
+            capacity: config.file_size,
             next_offset,
         })
     }
 
-    fn would_exceed_capacity(&self, bytes: &[u8]) -> bool {
-        bytes.len() as u64 + Self::HEADER_SIZE > self.capacity
+    fn append_len(bytes: &[u8]) -> u64 {
+        bytes.len() as u64 + Self::HEADER_SIZE
     }
 
-    fn append(&self, bytes: &[u8]) -> Result<u64, StorageError> {
+    fn would_exceed_capacity(&self, bytes: &[u8]) -> bool {
+        Self::append_len(bytes) + self.file.metadata().unwrap().len() > self.capacity
+    }
+
+    fn append(&self, bytes: &[u8]) -> Result<(u64, u64), StorageError> {
         if self.would_exceed_capacity(bytes) {
             return Err(FileCapacityExceeded(
                 self.filename.clone(),
@@ -87,20 +93,24 @@ impl StorageInstance {
         }
 
         let mut next_offset = self.next_offset.lock().unwrap();
+        let cur_offset = *next_offset;
 
-        self.file.write_all_at(
-            &StorageInstance::checksum(bytes).to_be_bytes(),
-            *next_offset,
-        )?;
+        self.file
+            .write_all_at(&StorageInstance::checksum(bytes).to_be_bytes(), cur_offset)?;
 
         let timestamp = StorageInstance::timestamp();
         self.file
-            .write_all_at(&timestamp.to_be_bytes(), *next_offset + 4)?;
+            .write_all_at(&timestamp.to_be_bytes(), cur_offset + 4)?;
         self.file
             .write_all_at(bytes, *next_offset + Self::HEADER_SIZE)?;
-        *next_offset += Self::HEADER_SIZE + bytes.len() as u64; // Swich next_offset to an atomic, and use a
+        *next_offset += Self::HEADER_SIZE + bytes.len() as u64;
 
-        Ok(timestamp)
+        Ok((cur_offset, timestamp))
+    }
+
+    fn set_read_only(&self) -> Result<(), StorageError> {
+        self.file.metadata()?.permissions().set_readonly(true);
+        Ok(())
     }
 
     fn parse_u32(bytes: &[u8], offset: u64) -> u32 {
@@ -136,7 +146,7 @@ struct Storage {
     files: boxcar::Vec<StorageInstance>,
     config: Config,
     // In bytes.
-    size: u64,
+    size: AtomicU64,
     max_bytes: u64,
 }
 
@@ -151,7 +161,7 @@ impl Storage {
             return None;
         };
 
-        let caps = regex!(r"^db_file_(?<number>)\d{5}$").captures(&filename)?;
+        let caps = regex!(r"^db_file_(?<number>\d{5})$").captures(&filename)?;
 
         Some((
             caps.get_match().as_str().into(),
@@ -169,15 +179,6 @@ impl Storage {
             .map_err(Into::into)
     }
 
-    fn set_read_only(storage_instance: &StorageInstance) -> Result<(), StorageError> {
-        storage_instance
-            .file
-            .metadata()?
-            .permissions()
-            .set_readonly(true);
-        Ok(())
-    }
-
     fn head_file(&self) -> Option<&StorageInstance> {
         self.files.get(self.files.count() - 1)
     }
@@ -193,6 +194,7 @@ impl Storage {
         }
 
         // Read existing files.
+        let mut size: u64 = 0;
         let mut num_to_file: BTreeMap<u32, StorageInstance> = BTreeMap::new();
         for file in fs::read_dir(path)? {
             let file = file?;
@@ -204,6 +206,7 @@ impl Storage {
             if let Some((filename, num)) = Self::extract_file_number(file.file_name()) {
                 let file = Self::open_file(file.path().to_str().unwrap(), false)?;
 
+                size += file.metadata().unwrap().len();
                 num_to_file.insert(num, StorageInstance::new(file, filename, &config)?);
             }
         }
@@ -222,25 +225,25 @@ impl Storage {
             files.push(file);
         }
 
-        let max_bytes = config.max_db_size_mb * 2u64.pow(20);
+        let max_bytes = config.max_db_size;
 
         Ok(Storage {
             config,
             files,
             max_bytes,
-            size: 0,
+            size: AtomicU64::new(size),
         })
     }
 
     pub fn append(&self, bytes: &[u8]) -> Result<AppendResponse, StorageError> {
-        // Check if max db size would be exceeded.
-        if bytes.len() as u64 + StorageInstance::HEADER_SIZE + self.size > self.max_bytes {
+        // Chec if max db size would be exceeded.
+        if StorageInstance::append_len(bytes) + self.size.load(Ordering::Acquire) > self.max_bytes {
             return Err(StorageCapacityExceeded(self.max_bytes, bytes.len() as u64));
         }
 
         // Create a new file if current head file would overflow.
         if self.head_file().unwrap().would_exceed_capacity(bytes) {
-            Self::set_read_only(self.head_file().unwrap())?;
+            self.head_file().unwrap().set_read_only()?;
 
             let next_file_name = format!("{}{:05}", Self::ROOT_FILE_NAME, self.files.count());
             let next_file_path = format!("{}{}", self.config.database_path, next_file_name);
@@ -253,26 +256,292 @@ impl Storage {
         }
 
         // Write the bytes.
-        let offset = self.head_file().unwrap().append(bytes)?;
+        let (offset, timestamp) = self.head_file().unwrap().append(bytes)?;
+        self.size
+            .fetch_add(StorageInstance::append_len(bytes), Ordering::Release);
         Ok(AppendResponse {
-            file_index: self.files.count() as u32,
+            file_index: self.files.count() as u32 - 1,
             offset,
+            timestamp,
         })
     }
 
     pub fn read(
         &self,
-        file_idx: u32,
+        file_index: u32,
         offset: u64,
         size: u64,
     ) -> Result<ReadResponse, StorageError> {
-        if file_idx > self.files.count() as u32 {
-            return Err(InvalidIndex(file_idx));
+        if file_index > self.files.count() as u32 {
+            return Err(InvalidIndex(file_index));
         }
 
         self.files
-            .get(file_idx as usize)
+            .get(file_index as usize)
             .unwrap()
             .read(offset, size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Seek, SeekFrom, Write};
+    use std::path::{Path, PathBuf};
+    use std::sync::{
+        Arc, Barrier, Mutex,
+        atomic::{AtomicU64, Ordering},
+    };
+    use std::thread;
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
+    static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+    static ONE_MB: u64 = 2u64.pow(20);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("keyval-storage-new-{}-{id}", std::process::id()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    struct CurrentDirGuard(PathBuf);
+
+    impl CurrentDirGuard {
+        fn change_to(path: &Path) -> Self {
+            let previous = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self(previous)
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.0).unwrap();
+        }
+    }
+
+    fn config(database_path: &Path, file_size: u64, max_db_size: u64) -> Config {
+        Config {
+            database_path: format!("{}/", database_path.display()),
+            command_mode: crate::config::CommandMode::Repl,
+            socket_address: "127.0.0.1:0".parse().unwrap(),
+            file_size,
+            max_db_size,
+            max_key_size: 1024,
+            max_value_size: 1024,
+        }
+    }
+
+    #[test]
+    fn initializes_empty_database_directory() {
+        let _lock = CURRENT_DIR_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new();
+        let _current_dir = CurrentDirGuard::change_to(temp_dir.path());
+        let config = Config {
+            database_path: ".".into(),
+            command_mode: crate::config::CommandMode::Repl,
+            socket_address: "127.0.0.1:0".parse().unwrap(),
+            file_size: ONE_MB,
+            max_db_size: 2 * ONE_MB,
+            max_key_size: 1024,
+            max_value_size: 1024,
+        };
+
+        let storage = Storage::new(config).unwrap();
+
+        assert_eq!(storage.files.count(), 1);
+        assert!(Path::new(Storage::INITIAL_FILE_NAME).is_file());
+    }
+
+    #[test]
+    fn initializes_from_numbered_files_with_gaps_and_ignores_other_files() {
+        let temp_dir = TempDir::new();
+        for filename in ["db_file_00000", "db_file_00002", "notes.txt"] {
+            File::create(temp_dir.path().join(filename)).unwrap();
+        }
+
+        let storage = Storage::new(config(temp_dir.path(), 1, 4)).unwrap();
+
+        assert_eq!(storage.files.count(), 2);
+    }
+
+    #[test]
+    fn reads_and_writes_valid_data() {
+        let temp_dir = TempDir::new();
+        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        let storage = Storage::new(config(temp_dir.path(), 1024, 2048)).unwrap();
+        let payload = b"append-only value";
+
+        let append1 = storage.append(payload).unwrap();
+        let read1 = storage.read(0, 0, payload.len() as u64).unwrap();
+        let AppendResponse {
+            file_index,
+            offset,
+            timestamp,
+        } = storage.append(payload).unwrap();
+        let read2 = storage
+            .read(file_index, offset, payload.len() as u64)
+            .unwrap();
+
+        assert_eq!(read1.bytes, payload);
+        assert_eq!(read1.timestamp, append1.timestamp);
+        assert_eq!(append1.file_index, 0);
+        assert_eq!(append1.offset, 0);
+        assert_eq!(read2.bytes, payload);
+        assert_eq!(read2.timestamp, timestamp);
+    }
+
+    #[test]
+    fn rejects_a_record_with_an_invalid_checksum() {
+        let temp_dir = TempDir::new();
+        let file_path = temp_dir.path().join(Storage::INITIAL_FILE_NAME);
+        File::create(&file_path).unwrap();
+        let storage = Storage::new(config(temp_dir.path(), ONE_MB, 2 * ONE_MB)).unwrap();
+        let payload = b"checksum-protected";
+        storage.append(payload).unwrap();
+
+        let mut file = OpenOptions::new().write(true).open(file_path).unwrap();
+        file.seek(SeekFrom::Start(StorageInstance::HEADER_SIZE))
+            .unwrap();
+        file.write_all(&[payload[0] ^ 0xff]).unwrap();
+        file.flush().unwrap();
+
+        assert!(matches!(
+            storage.read(0, 0, payload.len() as u64),
+            Err(StorageError::Corupted(_, 0, size)) if size == payload.len() as u64
+        ));
+    }
+
+    #[test]
+    fn rolls_over_when_the_head_file_cannot_fit_a_record() {
+        let temp_dir = TempDir::new();
+        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        let storage = Storage::new(config(temp_dir.path(), 20, 200)).unwrap();
+        storage.append(b"first").unwrap();
+
+        storage.append(b"more").unwrap();
+
+        assert_eq!(storage.files.count(), 2);
+        assert!(temp_dir.path().join("db_file_00001").is_file());
+    }
+
+    #[test]
+    fn concurrent_appends_and_reads_do_not_corrupt_records() {
+        let temp_dir = TempDir::new();
+        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        let storage = Arc::new(Storage::new(config(temp_dir.path(), 2 << 20, 2 << 20)).unwrap());
+        let initial = b"stable";
+        storage.append(initial).unwrap();
+
+        const WORKERS: usize = 10;
+        const WRITES_PER_WORKER: usize = 100;
+        const PAYLOAD_SIZE: usize = 32;
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let workers: Vec<_> = (0..WORKERS)
+            .map(|worker| {
+                let storage = Arc::clone(&storage);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let mut payloads = Vec::new();
+                    for idx in 0..WRITES_PER_WORKER {
+                        let mut payload = [0; PAYLOAD_SIZE];
+                        payload[..8].copy_from_slice(&(worker as u64).to_be_bytes());
+                        payload[8..16].copy_from_slice(&(idx as u64).to_be_bytes());
+                        payload[16..].fill(worker as u8);
+                        payloads.push(payload);
+                    }
+
+                    barrier.wait();
+
+                    for payload in &payloads {
+                        storage.append(payload).unwrap();
+                        let read = storage.read(0, 0, initial.len() as u64).unwrap();
+                        assert_eq!(read.bytes, initial);
+                    }
+                    payloads
+                })
+            })
+            .collect();
+
+        let mut expected: Vec<_> = workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap().to_vec())
+            .collect();
+        expected.sort();
+
+        let mut actual = Vec::with_capacity(WORKERS);
+        for index in 0..(WORKERS * WRITES_PER_WORKER) {
+            let offset = StorageInstance::HEADER_SIZE
+                + initial.len() as u64
+                + index as u64 * (StorageInstance::HEADER_SIZE + PAYLOAD_SIZE as u64);
+            actual.push(storage.read(0, offset, PAYLOAD_SIZE as u64).unwrap().bytes);
+        }
+        actual.sort();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn concurrent_appends_and_reads_add_new_files_correctly() {
+        let temp_dir = TempDir::new();
+        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        let storage = Arc::new(Storage::new(config(temp_dir.path(), 128, 2 << 20)).unwrap());
+        let initial = b"stable";
+        storage.append(initial).unwrap();
+
+        const WORKERS: usize = 1;
+        const WRITES_PER_WORKER: usize = 100;
+        const PAYLOAD_SIZE: usize = 32;
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let workers: Vec<_> = (0..WORKERS)
+            .map(|worker| {
+                let storage = Arc::clone(&storage);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let mut payloads = Vec::new();
+                    for idx in 0..WRITES_PER_WORKER {
+                        let mut payload = [0; PAYLOAD_SIZE];
+                        payload[..8].copy_from_slice(&(worker as u64).to_be_bytes());
+                        payload[8..16].copy_from_slice(&(idx as u64).to_be_bytes());
+                        payload[16..].fill(worker as u8);
+                        payloads.push(payload);
+                    }
+
+                    barrier.wait();
+
+                    for payload in &payloads {
+                        let AppendResponse {
+                            file_index, offset, ..
+                        } = storage.append(payload).unwrap();
+                        let read = storage
+                            .read(file_index, offset, PAYLOAD_SIZE as u64)
+                            .unwrap();
+                        assert_eq!(read.bytes, payload);
+                    }
+                })
+            })
+            .collect();
+
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        println!("Files: {}", storage.files.count());
     }
 }

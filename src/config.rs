@@ -13,19 +13,19 @@ pub struct Config {
     pub socket_address: SocketAddr,
 
     /// The file size for an individual file.
-    pub file_size_mb: u64,
+    pub file_size: u64,
 
     /// The maximum size for the entire database.
     /// Writes that would exceed this size will return an error.
-    pub max_db_size_mb: u64,
+    pub max_db_size: u64,
 
     /// The maximum size for a key.
     /// Writes with keys that would exceed this size will return an error.
-    pub max_key_size_kb: u64,
+    pub max_key_size: u64,
     ///
     /// The maximum size for the a value.
     /// Writes with values that would exceed this size will return an error.
-    pub max_value_size_kb: u64,
+    pub max_value_size: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
