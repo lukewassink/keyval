@@ -139,9 +139,13 @@ impl StorageInstance {
             timestamp,
         })
     }
+
+    pub fn flush(&self) -> Result<(), StorageError> {
+        self.file.sync_all().map_err(Into::into)
+    }
 }
 
-struct Storage {
+pub struct Storage {
     files: boxcar::Vec<StorageInstance>,
     config: Config,
     size: Mutex<u64>,
@@ -242,7 +246,9 @@ impl Storage {
 
         // Create a new file if current head file would overflow.
         if self.head_file().unwrap().would_exceed_capacity(bytes) {
-            self.head_file().unwrap().set_read_only()?;
+            let head = self.head_file().unwrap();
+            head.flush()?;
+            head.set_read_only()?;
 
             let next_file_name = format!("{}{:05}", Self::ROOT_FILE_NAME, self.files.count());
             let next_file_path = format!("{}{}", self.config.database_path, next_file_name);
@@ -278,6 +284,10 @@ impl Storage {
             .get(file_index as usize)
             .unwrap()
             .read(offset, size)
+    }
+
+    pub fn flush(&self) -> Result<(), StorageError> {
+        self.head_file().unwrap().flush().map_err(Into::into)
     }
 }
 
