@@ -2,6 +2,7 @@ mod config;
 mod engine;
 mod repl;
 mod storage_new;
+mod store;
 mod tcp;
 
 use std::{

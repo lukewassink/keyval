@@ -9,7 +9,7 @@ use crate::storage_new::Storage;
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq)]
 #[rkyv(compare(PartialEq), derive(Debug))]
-enum Request {
+pub enum Request {
     Put { key: Vec<u8>, val: Vec<u8> },
     Get { key: Vec<u8> },
     Delete { key: Vec<u8> },
@@ -18,7 +18,7 @@ enum Request {
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq)]
 #[rkyv(compare(PartialEq), derive(Debug))]
-enum Response {
+pub enum Response {
     Put { timestamp: u64 },
     Get { timestamp: u64, val: Vec<u8> },
     Delete { timestamp: u64 },
@@ -45,6 +45,8 @@ impl Engine {
     fn background(storage: Arc<Storage>) {}
 
     fn shutdown(&self) {}
+
+    fn process(&self, request: &Request) {}
 
     pub fn new(config: Config, storage: Arc<Storage>) -> Self {
         let mut readers = Vec::with_capacity(Self::READER_THREAD_COUNT);

@@ -1,5 +1,6 @@
+use boxcar;
 use clap::error::Result;
-use regex::regex;
+use regex::{bytes, regex};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -28,7 +29,7 @@ pub enum StorageError {
     InvalidIndex(u32),
 }
 
-struct StorageInstance {
+pub struct StorageInstance {
     file: File,
 
     filename: String,
@@ -40,18 +41,18 @@ struct StorageInstance {
 }
 
 pub struct ReadResponse {
-    timestamp: u64,
-    bytes: Vec<u8>,
+    pub timestamp: u64,
+    pub bytes: Vec<u8>,
 }
 
 pub struct AppendResponse {
-    file_index: u32,
-    offset: u64,
-    timestamp: u64,
+    pub file_index: u32,
+    pub offset: u64,
+    pub timestamp: u64,
 }
 
 impl StorageInstance {
-    const HEADER_SIZE: u64 = 12;
+    const HEADER_SIZE: u64 = 16;
 
     fn timestamp() -> u64 {
         SystemTime::now()
@@ -74,7 +75,7 @@ impl StorageInstance {
         })
     }
 
-    fn append_len(bytes: &[u8]) -> u64 {
+    pub fn append_len(bytes: &[u8]) -> u64 {
         bytes.len() as u64 + Self::HEADER_SIZE
     }
 
@@ -96,10 +97,11 @@ impl StorageInstance {
 
         self.file
             .write_all_at(&StorageInstance::checksum(bytes).to_be_bytes(), cur_offset)?;
-
         let timestamp = StorageInstance::timestamp();
         self.file
             .write_all_at(&timestamp.to_be_bytes(), cur_offset + 4)?;
+        self.file
+            .write_all_at(&(bytes.len() as u32).to_be_bytes(), cur_offset + 12);
         self.file
             .write_all_at(bytes, *next_offset + Self::HEADER_SIZE)?;
         *next_offset += Self::HEADER_SIZE + bytes.len() as u64;
@@ -140,13 +142,38 @@ impl StorageInstance {
         })
     }
 
-    pub fn flush(&self) -> Result<(), StorageError> {
+    // Uses the encoded size rather than reading the size from the keydir.
+    pub fn read_at(&self, offset: u64) -> Result<ReadResponse, StorageError> {
+        let mut header: Vec<u8> = vec![0; Self::HEADER_SIZE as usize];
+        self.file.read_exact_at(&mut header, offset)?;
+
+        let size = Self::parse_u32(&header, 12);
+        let bytes: Vec<u8> = vec![0; size as usize];
+
+        let checksum = Self::parse_u32(&header, 0);
+        if checksum != crc32fast::hash(&bytes) {
+            return Err(Corupted(self.filename.clone(), offset, size as u64));
+        }
+
+        let timestamp = Self::parse_u64(&header, 4);
+
+        Ok(ReadResponse {
+            bytes: bytes.into(),
+            timestamp,
+        })
+    }
+
+    fn flush(&self) -> Result<(), StorageError> {
         self.file.sync_all().map_err(Into::into)
+    }
+
+    pub fn len(&self) -> Result<u64, StorageError> {
+        Ok(self.file.metadata()?.len())
     }
 }
 
 pub struct Storage {
-    files: boxcar::Vec<StorageInstance>,
+    pub files: boxcar::Vec<StorageInstance>,
     config: Config,
     size: Mutex<u64>,
     max_bytes: u64,
@@ -185,7 +212,7 @@ impl Storage {
         self.files.get(self.files.count() - 1)
     }
 
-    pub fn new(config: Config) -> Result<Self, StorageError> {
+    pub fn initialize(config: Config) -> Result<Self, StorageError> {
         let path = &config.database_path;
         if !fs::exists(path)? {
             fs::create_dir_all(path)?;
@@ -371,7 +398,7 @@ mod tests {
             max_value_size: 1024,
         };
 
-        let storage = Storage::new(config).unwrap();
+        let storage = Storage::initialize(config).unwrap();
 
         assert_eq!(storage.files.count(), 1);
         assert!(Path::new(Storage::INITIAL_FILE_NAME).is_file());
@@ -384,7 +411,7 @@ mod tests {
             File::create(temp_dir.path().join(filename)).unwrap();
         }
 
-        let storage = Storage::new(config(temp_dir.path(), 1, 4)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), 1, 4)).unwrap();
 
         assert_eq!(storage.files.count(), 2);
     }
@@ -393,7 +420,7 @@ mod tests {
     fn reads_and_writes_valid_data() {
         let temp_dir = TempDir::new();
         File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
-        let storage = Storage::new(config(temp_dir.path(), 1024, 2048)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), 1024, 2048)).unwrap();
         let payload = b"append-only value";
 
         let append1 = storage.append(payload).unwrap();
@@ -420,7 +447,7 @@ mod tests {
         let temp_dir = TempDir::new();
         let file_path = temp_dir.path().join(Storage::INITIAL_FILE_NAME);
         File::create(&file_path).unwrap();
-        let storage = Storage::new(config(temp_dir.path(), ONE_MB, 2 * ONE_MB)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), ONE_MB, 2 * ONE_MB)).unwrap();
         let payload = b"checksum-protected";
         storage.append(payload).unwrap();
 
@@ -440,7 +467,7 @@ mod tests {
     fn rolls_over_when_the_head_file_cannot_fit_a_record() {
         let temp_dir = TempDir::new();
         File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
-        let storage = Storage::new(config(temp_dir.path(), 20, 200)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), 20, 200)).unwrap();
         storage.append(b"first").unwrap();
 
         storage.append(b"more").unwrap();
@@ -453,7 +480,8 @@ mod tests {
     fn concurrent_appends_and_reads_do_not_corrupt_records() {
         let temp_dir = TempDir::new();
         File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
-        let storage = Arc::new(Storage::new(config(temp_dir.path(), 2 << 20, 2 << 20)).unwrap());
+        let storage =
+            Arc::new(Storage::initialize(config(temp_dir.path(), 2 << 20, 2 << 20)).unwrap());
         let initial = b"stable";
         storage.append(initial).unwrap();
 
@@ -509,7 +537,7 @@ mod tests {
     fn concurrent_appends_and_reads_add_new_files_correctly() {
         let temp_dir = TempDir::new();
         File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
-        let storage = Arc::new(Storage::new(config(temp_dir.path(), 128, 2 << 20)).unwrap());
+        let storage = Arc::new(Storage::initialize(config(temp_dir.path(), 128, 2 << 20)).unwrap());
         let initial = b"stable";
         storage.append(initial).unwrap();
 
