@@ -15,7 +15,7 @@ pub enum StoreError {
     #[error("{0}")]
     IO(#[from] io::Error),
     #[error("{0}")]
-    Storage(#[from] StorageError),
+    StorageLayer(#[from] StorageError),
     #[error("Error deserializing stored entry: {0}")]
     Deserialization(#[from] rancor::Error),
     #[error("Key {0:?} was not found")]
@@ -125,7 +125,7 @@ impl Store {
             }
         }
 
-        return Ok(keydir);
+        Ok(keydir)
     }
 
     pub fn initialize(storage: Storage) -> Result<Self, StoreError> {
@@ -192,5 +192,148 @@ impl Store {
         let contains = self.keydir.contains_key(&request.key);
 
         Ok(ContainsResponse { contains })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage_new::tests::{TempDir, config};
+
+    fn open_store(database: &TempDir, file_size: u64) -> Store {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(database.path().join("db_file_00000"))
+            .unwrap();
+        let config = config(database.path(), file_size, 2 * 1024 * 1024);
+        Store::initialize(Storage::initialize(config).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn initializes_keydir_from_an_empty_file() {
+        let database = TempDir::new();
+        let store = open_store(&database, 1024);
+
+        assert!(store.keydir.is_empty());
+    }
+
+    #[test]
+    fn put_get_delete_and_contains_keep_keydir_in_sync() {
+        let database = TempDir::new();
+        let store = open_store(&database, 1024);
+        let key = b"key".to_vec();
+        let value = b"value".to_vec();
+
+        store
+            .put(PutRequest {
+                key: key.clone(),
+                val: value.clone(),
+            })
+            .unwrap();
+        assert!(
+            store
+                .contains(ContainsRequest { key: key.clone() })
+                .unwrap()
+                .contains
+        );
+        assert_eq!(
+            store.get(GetRequest { key: key.clone() }).unwrap().val,
+            value
+        );
+
+        store.delete(DeleteRequest { key: key.clone() }).unwrap();
+        assert!(
+            !store
+                .contains(ContainsRequest { key: key.clone() })
+                .unwrap()
+                .contains
+        );
+        assert!(matches!(
+            store.get(GetRequest { key }),
+            Err(StoreError::KeyNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn initializes_keydir_from_writes_and_deletes_in_a_single_file() {
+        let database = TempDir::new();
+        let store = open_store(&database, 1024);
+        let retained_key = b"retained".to_vec();
+        let deleted_key = b"deleted".to_vec();
+
+        store
+            .put(PutRequest {
+                key: retained_key.clone(),
+                val: b"retained value".to_vec(),
+            })
+            .unwrap();
+        store
+            .put(PutRequest {
+                key: deleted_key.clone(),
+                val: b"deleted value".to_vec(),
+            })
+            .unwrap();
+        store
+            .delete(DeleteRequest {
+                key: deleted_key.clone(),
+            })
+            .unwrap();
+        drop(store);
+
+        let reopened = open_store(&database, 1024);
+
+        assert!(
+            reopened
+                .contains(ContainsRequest {
+                    key: retained_key.clone()
+                })
+                .unwrap()
+                .contains
+        );
+        assert_eq!(
+            reopened.get(GetRequest { key: retained_key }).unwrap().val,
+            b"retained value"
+        );
+        assert!(
+            !reopened
+                .contains(ContainsRequest {
+                    key: deleted_key.clone()
+                })
+                .unwrap()
+                .contains
+        );
+        assert!(matches!(
+            reopened.get(GetRequest { key: deleted_key }),
+            Err(StoreError::KeyNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn initializes_keydir_from_records_in_multiple_files() {
+        let database = TempDir::new();
+        let store = open_store(&database, 128);
+        let entries = [
+            (b"key-one".to_vec(), b"value-one".to_vec()),
+            (b"key-two".to_vec(), b"value-two".to_vec()),
+            (b"key-three".to_vec(), b"value-three".to_vec()),
+        ];
+
+        for (key, val) in &entries {
+            store
+                .put(PutRequest {
+                    key: key.clone(),
+                    val: val.clone(),
+                })
+                .unwrap();
+        }
+        assert!(store.storage.files.count() > 1);
+        drop(store);
+
+        let reopened = open_store(&database, 128);
+
+        for (key, val) in entries {
+            assert_eq!(reopened.get(GetRequest { key }).unwrap().val, val);
+        }
     }
 }

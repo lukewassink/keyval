@@ -60,10 +60,6 @@ impl StorageInstance {
             .as_nanos() as u64
     }
 
-    fn checksum(bytes: &[u8]) -> u32 {
-        crc32fast::hash(bytes)
-    }
-
     fn new(file: File, filename: String, config: &Config) -> Result<Self, StorageError> {
         let next_offset = Mutex::new(file.metadata()?.len());
         Ok(StorageInstance {
@@ -93,18 +89,22 @@ impl StorageInstance {
 
         let mut next_offset = self.next_offset.lock().unwrap();
         let cur_offset = *next_offset;
-
-        self.file
-            .write_all_at(&StorageInstance::checksum(bytes).to_be_bytes(), cur_offset)?;
         let timestamp = StorageInstance::timestamp();
+
+        // Checksum
+        self.file
+            .write_all_at(&crc32fast::hash(bytes).to_be_bytes(), cur_offset)?;
+        // Timestamp
         self.file
             .write_all_at(&timestamp.to_be_bytes(), cur_offset + 4)?;
+        // Size
         self.file
             .write_all_at(&(bytes.len() as u32).to_be_bytes(), cur_offset + 12)?;
+        // Bytes
         self.file
             .write_all_at(bytes, *next_offset + Self::HEADER_SIZE)?;
-        *next_offset += Self::HEADER_SIZE + bytes.len() as u64;
 
+        *next_offset += Self::HEADER_SIZE + bytes.len() as u64;
         Ok((cur_offset, timestamp))
     }
 
@@ -147,7 +147,9 @@ impl StorageInstance {
         self.file.read_exact_at(&mut header, offset)?;
 
         let size = Self::parse_u32(&header, 12);
-        let bytes: Vec<u8> = vec![0; size as usize];
+        let mut bytes: Vec<u8> = vec![0; size as usize];
+        self.file
+            .read_exact_at(&mut bytes, offset + Self::HEADER_SIZE)?;
 
         let checksum = Self::parse_u32(&header, 0);
         if checksum != crc32fast::hash(&bytes) {
@@ -318,7 +320,7 @@ impl Storage {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
@@ -332,10 +334,10 @@ mod tests {
     static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
     static ONE_MB: u64 = 2u64.pow(20);
 
-    struct TempDir(PathBuf);
+    pub(crate) struct TempDir(PathBuf);
 
     impl TempDir {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir()
                 .join(format!("keyval-storage-new-{}-{id}", std::process::id()));
@@ -343,7 +345,7 @@ mod tests {
             Self(path)
         }
 
-        fn path(&self) -> &Path {
+        pub(crate) fn path(&self) -> &Path {
             &self.0
         }
     }
@@ -370,7 +372,7 @@ mod tests {
         }
     }
 
-    fn config(database_path: &Path, file_size: u64, max_db_size: u64) -> Config {
+    pub(crate) fn config(database_path: &Path, file_size: u64, max_db_size: u64) -> Config {
         Config {
             database_path: format!("{}/", database_path.display()),
             command_mode: crate::config::CommandMode::Repl,
