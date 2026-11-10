@@ -1,72 +1,37 @@
 use protocol::Operation::{self, Contains, Delete, Get, Put};
 use protocol::Status::{InternalError, InvalidRequest, Success};
 use protocol::message::Message;
-use protocol::{
-    ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
-    PutRequest, PutResponse,
-};
+use std::io::Read;
 use std::io::Write;
-use std::io::{Read, Seek};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use std::thread::{self};
 use std::time::Duration;
 use thiserror::*;
 
-use crate::storage::{ReadRequest, ReadResponse, Storage, WriteRequest};
+use crate::engine::{Engine, EngineError, Request, Response};
+use crate::store;
 
 #[derive(Error, Debug)]
 pub enum TcpHandlerError {
-    #[error("{0}")]
-    Database(#[from] crate::storage::StorageError),
     #[error("Error decoding request: {0}")]
     Request(#[from] protocol::DecodingError),
     #[error("Error encoding response: {0}")]
     Response(#[from] protocol::EncodingError),
     #[error("TCP stream error: {0}")]
     TCPStream(#[from] std::io::Error),
+    #[error("Error processing the request {0}")]
+    InternalError(#[from] EngineError),
 }
 
 pub fn create_listener(socket_addr: SocketAddr) -> std::io::Result<TcpListener> {
     TcpListener::bind(socket_addr)
 }
 
-fn handle_connection(
-    mut stream: TcpStream,
-    storage: Arc<Mutex<Storage<impl Read + Write + Seek>>>,
-    quit: Arc<AtomicBool>,
-) -> Result<(), TcpHandlerError> {
-    let address = stream.peer_addr()?;
-
-    loop {
-        if quit.load(std::sync::atomic::Ordering::Relaxed) {
-            return Ok(());
-        }
-
-        let mut op_buf: [u8; 1] = [0; 1];
-        if stream.read(&mut op_buf)? == 0 {
-            println!("Connection terminated by {}", address);
-            return Ok(());
-        }
-
-        let mut storage = storage.lock().unwrap();
-
-        match Operation::decode(op_buf[0]) {
-            Ok(Put) => handle_put_request(&mut stream, &mut storage)?,
-            Ok(Get) => handle_get_request(&mut stream, &mut storage)?,
-            Ok(Delete) => handle_delete_request(&mut stream, &mut storage)?,
-            Ok(Contains) => handle_contains_request(&mut stream, &mut storage)?,
-            // Rather than dropping invalid requests silently, consider an
-            // InvalidRequestResponse message.
-            Err(_) => {}
-        }
-    }
-}
-
-pub fn handle_requests<T: Read + Write + Seek + Send>(
+pub fn handle_requests(
     listener: TcpListener,
-    storage: Arc<Mutex<Storage<T>>>,
+    engine: Arc<Engine>,
     quit: Arc<AtomicBool>,
 ) -> Result<(), TcpHandlerError> {
     let Ok(local_address) = listener.local_addr() else {
@@ -96,10 +61,10 @@ pub fn handle_requests<T: Read + Write + Seek + Send>(
                 continue;
             }
 
-            let storage: Arc<Mutex<Storage<T>>> = storage.clone();
+            let engine = engine.clone();
             let quit = quit.clone();
             s.spawn(move || {
-                let _ = handle_connection(stream, storage, quit);
+                let _ = handle_connection(stream, engine, quit);
             });
         }
     });
@@ -107,26 +72,57 @@ pub fn handle_requests<T: Read + Write + Seek + Send>(
     Ok(())
 }
 
+fn handle_connection(
+    mut stream: TcpStream,
+    engine: Arc<Engine>,
+    quit: Arc<AtomicBool>,
+) -> Result<(), TcpHandlerError> {
+    let address = stream.peer_addr()?;
+
+    loop {
+        if quit.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let mut op_buf: [u8; 1] = [0; 1];
+        if stream.read(&mut op_buf)? == 0 {
+            println!("Connection terminated by {}", address);
+            return Ok(());
+        }
+
+        let engine = engine.clone();
+        match Operation::decode(op_buf[0]) {
+            Ok(Put) => handle_put_request(&mut stream, engine)?,
+            Ok(Get) => handle_get_request(&mut stream, engine)?,
+            Ok(Delete) => handle_delete_request(&mut stream, engine)?,
+            Ok(Contains) => handle_contains_request(&mut stream, engine)?,
+            // Rather than dropping invalid requests silently, consider an
+            // InvalidRequestResponse message.
+            Err(_) => {}
+        }
+    }
+}
+
 fn handle_put_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage<impl Read + Write + Seek>,
+    engine: Arc<Engine>,
 ) -> Result<(), TcpHandlerError> {
-    let Ok(request) = PutRequest::decode(&mut stream) else {
-        let response = PutResponse {
+    let Ok(request) = protocol::PutRequest::decode(&mut stream) else {
+        let response = protocol::PutResponse {
             status: InvalidRequest,
         };
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
 
-    let write_request = WriteRequest {
-        key: &request.key,
-        val: &request.val,
+    let request = store::PutRequest {
+        key: request.key,
+        val: request.val,
     };
 
-    let response = match storage.write(&write_request) {
-        Ok(_) => PutResponse { status: Success },
-        Err(_) => PutResponse {
+    let response = match engine.process(Request::Put(request))?.recv() {
+        Ok(_) => protocol::PutResponse { status: Success },
+        Err(_) => protocol::PutResponse {
             status: InternalError,
         },
     };
@@ -138,22 +134,22 @@ fn handle_put_request(
 
 fn handle_get_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage<impl Read + Write + Seek>,
+    engine: Arc<Engine>,
 ) -> Result<(), TcpHandlerError> {
-    let Ok(request) = GetRequest::decode(&mut stream) else {
-        let response = GetResponse::failed(InvalidRequest);
+    let Ok(request) = protocol::GetRequest::decode(&mut stream) else {
+        let response = protocol::GetResponse::failed(InvalidRequest);
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
 
-    let read_request = ReadRequest { key: &request.key };
+    let request = store::GetRequest { key: request.key };
 
-    let response = match storage.read(&read_request) {
-        Ok(ReadResponse { val, .. }) => GetResponse {
+    let response = match engine.process(Request::Get(request))?.recv() {
+        Ok(Response::Get(store::GetResponse { val, .. })) => protocol::GetResponse {
             status: Success,
             val,
         },
-        Err(_) => GetResponse::failed(InternalError),
+        _ => protocol::GetResponse::failed(InternalError),
     };
 
     stream.write_all(&response.encode()?)?;
@@ -162,21 +158,21 @@ fn handle_get_request(
 
 fn handle_delete_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage<impl Read + Write + Seek>,
+    engine: Arc<Engine>,
 ) -> Result<(), TcpHandlerError> {
-    let Ok(request) = DeleteRequest::decode(&mut stream) else {
-        let response = DeleteResponse {
+    let Ok(request) = protocol::DeleteRequest::decode(&mut stream) else {
+        let response = protocol::DeleteResponse {
             status: InvalidRequest,
         };
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
 
-    let delete_request = crate::storage::DeleteRequest { key: &request.key };
+    let request = store::DeleteRequest { key: request.key };
 
-    let response = match storage.delete(&delete_request) {
-        Ok(_) => DeleteResponse { status: Success },
-        Err(_) => DeleteResponse {
+    let response = match engine.process(Request::Delete(request))?.recv() {
+        Ok(_) => protocol::DeleteResponse { status: Success },
+        Err(_) => protocol::DeleteResponse {
             status: InternalError,
         },
     };
@@ -188,19 +184,27 @@ fn handle_delete_request(
 
 fn handle_contains_request(
     mut stream: &mut (impl Read + Write),
-    storage: &mut Storage<impl Read + Write + Seek>,
+    engine: Arc<Engine>,
 ) -> Result<(), TcpHandlerError> {
-    let Ok(request) = ContainsRequest::decode(&mut stream) else {
-        let response = ContainsResponse::failed(InvalidRequest);
+    let Ok(request) = protocol::ContainsRequest::decode(&mut stream) else {
+        let response = protocol::ContainsResponse::failed(InvalidRequest);
         stream.write_all(&response.encode()?)?;
         return Ok(());
     };
 
-    let contains_request = crate::storage::ContainsRequest { key: &request.key };
+    let request = store::ContainsRequest { key: request.key };
 
-    let response = ContainsResponse {
-        status: Success,
-        contains: storage.contains(&contains_request),
+    let response = match engine.process(Request::Contains(request))?.recv() {
+        Ok(Response::Contains(store::ContainsResponse { contains, .. })) => {
+            protocol::ContainsResponse {
+                status: Success,
+                contains,
+            }
+        }
+        _ => protocol::ContainsResponse {
+            status: InternalError,
+            contains: false,
+        },
     };
 
     let buf = response.encode()?;

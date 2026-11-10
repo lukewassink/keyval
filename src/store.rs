@@ -26,44 +26,44 @@ pub enum StoreError {
 
 #[derive(Debug)]
 pub struct PutRequest {
-    key: Vec<u8>,
-    val: Vec<u8>,
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct GetRequest {
-    key: Vec<u8>,
+    pub key: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct DeleteRequest {
-    key: Vec<u8>,
+    pub key: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct ContainsRequest {
-    key: Vec<u8>,
+    pub key: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct PutResponse {
-    timestamp: u64,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
 pub struct GetResponse {
-    val: Vec<u8>,
-    timestamp: u64,
+    pub val: Vec<u8>,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
 pub struct DeleteResponse {
-    timestamp: u64,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
 pub struct ContainsResponse {
-    contains: bool,
+    pub contains: bool,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq)]
