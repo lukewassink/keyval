@@ -6,7 +6,7 @@ use rkyv::{Archive, Deserialize, Serialize, rancor};
 use thiserror::Error;
 
 use crate::{
-    storage_new::{AppendResponse, Storage, StorageError, StorageInstance},
+    storage::{AppendResponse, Storage, StorageError, StorageInstance},
     store::StoreError::*,
 };
 
@@ -225,7 +225,7 @@ pub(crate) mod engine_test_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage_new::tests::{TempDir, config};
+    use crate::storage::tests::{TempDir, config};
 
     fn open_store(database: &TempDir, file_size: u64) -> Store {
         std::fs::OpenOptions::new()

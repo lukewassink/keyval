@@ -2,7 +2,6 @@ mod config;
 mod engine;
 mod repl;
 mod storage;
-mod storage_new;
 mod store;
 mod tcp;
 

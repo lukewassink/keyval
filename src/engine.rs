@@ -1,6 +1,5 @@
 use clap::error::Result;
 use crossbeam_channel::{Receiver, Sender};
-use std::net::Shutdown;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
@@ -199,7 +198,7 @@ impl Drop for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage_new::{
+    use crate::storage::{
         Storage,
         tests::{TempDir, config},
     };
