@@ -16,6 +16,7 @@ ctrlc = "3.5.2"
 dashmap = "6.2.1"
 derive-new = "0.7.0"
 easy-repl = "0.2.1"
+oneshot = "0.2.1"
 protocol = { path = "./protocol" }
 regex = "1.13.1"
 rkyv = "0.8.18"

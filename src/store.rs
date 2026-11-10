@@ -24,52 +24,46 @@ pub enum StoreError {
     InvalidGetLocation(Vec<u8>, Location),
 }
 
+#[derive(Debug)]
 pub struct PutRequest {
     key: Vec<u8>,
     val: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct GetRequest {
     key: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct DeleteRequest {
     key: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct ContainsRequest {
     key: Vec<u8>,
 }
 
-pub enum Request {
-    Put(PutRequest),
-    Get(GetRequest),
-    Delete(DeleteRequest),
-    Contains(ContainsRequest),
-}
-
+#[derive(Debug)]
 pub struct PutResponse {
     timestamp: u64,
 }
 
+#[derive(Debug)]
 pub struct GetResponse {
     val: Vec<u8>,
     timestamp: u64,
 }
 
+#[derive(Debug)]
 pub struct DeleteResponse {
     timestamp: u64,
 }
 
+#[derive(Debug)]
 pub struct ContainsResponse {
     contains: bool,
-}
-
-pub enum Response {
-    Put(PutResponse),
-    Get(GetResponse),
-    Delete(DeleteResponse),
-    Contains(ContainsResponse),
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq)]
@@ -192,6 +186,39 @@ impl Store {
         let contains = self.keydir.contains_key(&request.key);
 
         Ok(ContainsResponse { contains })
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod engine_test_helpers {
+    use super::*;
+
+    pub(crate) fn put_request(key: Vec<u8>, val: Vec<u8>) -> PutRequest {
+        PutRequest { key, val }
+    }
+
+    pub(crate) fn get_request(key: Vec<u8>) -> GetRequest {
+        GetRequest { key }
+    }
+
+    pub(crate) fn delete_request(key: Vec<u8>) -> DeleteRequest {
+        DeleteRequest { key }
+    }
+
+    pub(crate) fn contains_request(key: Vec<u8>) -> ContainsRequest {
+        ContainsRequest { key }
+    }
+
+    pub(crate) fn get_value(response: GetResponse) -> Vec<u8> {
+        response.val
+    }
+
+    pub(crate) fn contains_value(response: ContainsResponse) -> bool {
+        response.contains
+    }
+
+    pub(crate) fn put_timestamp(response: PutResponse) -> u64 {
+        response.timestamp
     }
 }
 
