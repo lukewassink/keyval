@@ -1,20 +1,27 @@
 use std::io;
 
+use clap::error::Result;
 use dashmap::DashMap;
-use regex::bytes;
 use rkyv::{Archive, Deserialize, Serialize, rancor};
 use thiserror::Error;
 
-use crate::storage_new::{AppendResponse, Storage, StorageError, StorageInstance};
+use crate::{
+    storage_new::{AppendResponse, Storage, StorageError, StorageInstance},
+    store::StoreError::*,
+};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("IO error: {0}")]
+    #[error("{0}")]
     IO(#[from] io::Error),
-    #[error("Storage error: {0}")]
+    #[error("{0}")]
     Storage(#[from] StorageError),
     #[error("Error deserializing stored entry: {0}")]
     Deserialization(#[from] rancor::Error),
+    #[error("Key {0:?} was not found")]
+    KeyNotFound(Vec<u8>),
+    #[error("The entry for key {0:?} at location {1:?} is not StorageFormat::Put.")]
+    InvalidGetLocation(Vec<u8>, Location),
 }
 
 pub struct PutRequest {
@@ -56,7 +63,6 @@ pub struct DeleteResponse {
 
 pub struct ContainsResponse {
     contains: bool,
-    timestamp: u64,
 }
 
 pub enum Response {
@@ -74,7 +80,8 @@ enum StorageFormat {
     Delete { key: Vec<u8> },
 }
 
-struct Location {
+#[derive(Debug, Clone)]
+pub struct Location {
     file_index: u32,
     offset: u64,
     size: u32,
@@ -131,6 +138,7 @@ impl Store {
             key: request.key.clone(),
             val: request.val,
         })?;
+
         let AppendResponse {
             file_index,
             offset,
@@ -145,5 +153,44 @@ impl Store {
         self.keydir.insert(request.key, location);
 
         Ok(PutResponse { timestamp })
+    }
+
+    pub fn get(&self, request: GetRequest) -> Result<GetResponse, StoreError> {
+        let Some(location) = self.keydir.get(&request.key) else {
+            return Err(KeyNotFound(request.key));
+        };
+
+        let response =
+            self.storage
+                .read(location.file_index, location.offset, location.size as u64)?;
+
+        let ArchivedStorageFormat::Put { val, .. } =
+            rkyv::access::<ArchivedStorageFormat, rancor::Error>(&response.bytes)?
+        else {
+            return Err(InvalidGetLocation(request.key, location.value().clone()));
+        };
+
+        Ok(GetResponse {
+            val: val.to_vec(),
+            timestamp: response.timestamp,
+        })
+    }
+
+    pub fn delete(&self, request: DeleteRequest) -> Result<DeleteResponse, StoreError> {
+        let bytes = rkyv::to_bytes::<rancor::Error>(&StorageFormat::Delete {
+            key: request.key.clone(),
+        })?;
+
+        let AppendResponse { timestamp, .. } = self.storage.append(&bytes)?;
+
+        self.keydir.remove(&request.key);
+
+        Ok(DeleteResponse { timestamp })
+    }
+
+    pub fn contains(&self, request: ContainsRequest) -> Result<ContainsResponse, StoreError> {
+        let contains = self.keydir.contains_key(&request.key);
+
+        Ok(ContainsResponse { contains })
     }
 }

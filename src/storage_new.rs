@@ -1,6 +1,5 @@
-use boxcar;
 use clap::error::Result;
-use regex::{bytes, regex};
+use regex::regex;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -101,7 +100,7 @@ impl StorageInstance {
         self.file
             .write_all_at(&timestamp.to_be_bytes(), cur_offset + 4)?;
         self.file
-            .write_all_at(&(bytes.len() as u32).to_be_bytes(), cur_offset + 12);
+            .write_all_at(&(bytes.len() as u32).to_be_bytes(), cur_offset + 12)?;
         self.file
             .write_all_at(bytes, *next_offset + Self::HEADER_SIZE)?;
         *next_offset += Self::HEADER_SIZE + bytes.len() as u64;
@@ -467,7 +466,7 @@ mod tests {
     fn rolls_over_when_the_head_file_cannot_fit_a_record() {
         let temp_dir = TempDir::new();
         File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
-        let storage = Storage::initialize(config(temp_dir.path(), 20, 200)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), 30, 200)).unwrap();
         storage.append(b"first").unwrap();
 
         storage.append(b"more").unwrap();
