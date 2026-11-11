@@ -5,7 +5,6 @@ use std::thread;
 use std::thread::JoinHandle;
 use thiserror::Error;
 
-use crate::config::Config;
 use crate::engine::EngineError::{InvalidShutdownRequest, NotARead, NotAWrite};
 use crate::store::{
     ContainsRequest, ContainsResponse, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
@@ -26,6 +25,8 @@ pub enum EngineError {
         "Shutdown should only be passed directly to the read and write receivers, not to proccess()."
     )]
     InvalidShutdownRequest,
+    #[error("Send error: {0}")]
+    SendError(#[from] oneshot::SendError<Response>),
 }
 
 #[derive(Debug)]
@@ -51,10 +52,12 @@ pub enum Response {
     Contains(ContainsResponse),
 }
 
+type Handle = JoinHandle<Result<(), EngineError>>;
+type Handles = Vec<Handle>;
+
 pub struct Engine {
-    config: Config,
-    readers: Mutex<Option<Vec<JoinHandle<Result<(), EngineError>>>>>,
-    writer: Mutex<Option<JoinHandle<Result<(), EngineError>>>>,
+    readers: Mutex<Option<Handles>>,
+    writer: Mutex<Option<Handle>>,
     writes_tx: Sender<(Request, oneshot::Sender<Response>)>,
     reads_tx: Sender<(Request, oneshot::Sender<Response>)>,
 }
@@ -71,11 +74,11 @@ impl Engine {
             match request {
                 Request::Get(get_request) => {
                     let response = store.get(get_request)?;
-                    sender.send(Response::Get(response));
+                    sender.send(Response::Get(response))?;
                 }
                 Request::Contains(contains_request) => {
                     let response = store.contains(contains_request)?;
-                    sender.send(Response::Contains(response));
+                    sender.send(Response::Contains(response))?;
                 }
                 Request::Shutdown(_) => {
                     break;
@@ -97,11 +100,11 @@ impl Engine {
             match request {
                 Request::Put(put_request) => {
                     let response = store.put(put_request)?;
-                    sender.send(Response::Put(response));
+                    sender.send(Response::Put(response))?;
                 }
                 Request::Delete(delete_request) => {
                     let response = store.delete(delete_request)?;
-                    sender.send(Response::Delete(response));
+                    sender.send(Response::Delete(response))?;
                 }
                 Request::Shutdown(_) => {
                     break;
@@ -133,7 +136,7 @@ impl Engine {
         Ok(receiver)
     }
 
-    pub fn new(config: Config, store: Arc<Store>) -> Self {
+    pub fn new(store: Arc<Store>) -> Self {
         let mut readers = Vec::with_capacity(Self::READER_THREAD_COUNT);
         let writer;
 
@@ -155,7 +158,6 @@ impl Engine {
         }
 
         Engine {
-            config,
             readers: Mutex::new(Some(readers)),
             writer,
             writes_tx,
@@ -216,12 +218,8 @@ mod tests {
 
         let store_config = config(database.path(), 1 << 20, 32 << 20);
         let store = Store::initialize(Storage::initialize(store_config).unwrap()).unwrap();
-        let engine_config = config(database.path(), 1 << 20, 32 << 20);
 
-        (
-            database,
-            Arc::new(Engine::new(engine_config, Arc::new(store))),
-        )
+        (database, Arc::new(Engine::new(Arc::new(store))))
     }
 
     fn close_workers_and_drop(mut engine: Engine) {

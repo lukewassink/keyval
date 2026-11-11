@@ -158,10 +158,7 @@ impl StorageInstance {
 
         let timestamp = Self::parse_u64(&header, 4);
 
-        Ok(ReadResponse {
-            bytes: bytes.into(),
-            timestamp,
-        })
+        Ok(ReadResponse { bytes, timestamp })
     }
 
     fn flush(&self) -> Result<(), StorageError> {
@@ -312,10 +309,6 @@ impl Storage {
             .get(file_index as usize)
             .unwrap()
             .read(offset, size)
-    }
-
-    pub fn flush(&self) -> Result<(), StorageError> {
-        self.head_file().unwrap().flush().map_err(Into::into)
     }
 }
 

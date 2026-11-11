@@ -6,10 +6,9 @@ mod store;
 mod tcp;
 
 use std::{
-    fs::File,
     net::{Shutdown, TcpStream},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -52,7 +51,7 @@ fn main() -> Result<(), Error> {
     // Initialize database.
     let storage = Storage::initialize(config.clone())?;
     let store = Arc::new(Store::initialize(storage)?);
-    let engine = Engine::new(config.clone(), store);
+    let engine = Engine::new(store);
 
     let quit = Arc::new(AtomicBool::new(false));
     {
