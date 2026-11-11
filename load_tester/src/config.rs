@@ -17,6 +17,13 @@ pub struct Config {
     /// If <writes> is zero, this number must be zero too.
     pub reads: usize,
 
+    /// Number of delete requests each thread should make for a valid key.
+    /// If <writes> is zero, this number must be zero too.
+    pub deletes: usize,
+
+    /// Number of read requests each thread should make for a key that is not present.
+    pub misses: usize,
+
     /// Database address to send requests to.
     pub db_address: SocketAddr,
 
@@ -32,15 +39,19 @@ pub struct Config {
 
 impl Config {
     pub fn total_requests(&self) -> usize {
-        (self.reads + self.writes) * self.users
+        (self.reads + self.writes + self.deletes + self.misses) * self.users
     }
 
     pub fn total_reads(&self) -> usize {
-        self.reads * self.users
+        (self.reads + self.misses) * self.users
     }
 
     pub fn total_writes(&self) -> usize {
         self.writes * self.users
+    }
+
+    pub fn total_deletes(&self) -> usize {
+        self.deletes * self.users
     }
 }
 
@@ -74,9 +85,14 @@ fn load_config(config_path: String) -> Result<Config, Error> {
     let config = std::fs::read_to_string(config_path)?;
     let config: Config = toml::from_str(&config)?;
 
-    if config.writes == 0 && config.reads > 0 {
+    if config.writes == 0 && (config.reads > 0 || config.deletes > 0) {
         return Err(Error::InvalidConfig(
-            "It is invalid to set writes = 0 and reads != 0.".to_string(),
+            "It is invalid to set writes = 0 and reads or deletes != 0.".to_string(),
+        ));
+    }
+    if config.deletes > config.writes {
+        return Err(Error::InvalidConfig(
+            "The number of deletes cannot exceed the number of writes.".to_string(),
         ));
     }
     if config.max_val_length <= config.min_val_length {

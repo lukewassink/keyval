@@ -76,13 +76,17 @@ fn main() -> Result<(), Error> {
         .truncate(false)
         .open(config.output_path.clone())?;
 
-    writeln!(file, "# Total time, total reads, total writes")?;
     writeln!(
         file,
-        "# {}, {}, {}",
+        "# Total time, total reads, total writes, total deletes"
+    )?;
+    writeln!(
+        file,
+        "# {}, {}, {}, {}",
         (end_time - start_time).as_micros(),
         config.total_reads(),
-        config.total_writes()
+        config.total_writes(),
+        config.total_deletes()
     )?;
 
     let mut writer = csv::WriterBuilder::new()

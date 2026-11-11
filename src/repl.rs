@@ -2,7 +2,7 @@ use easy_repl::{CommandStatus, Repl, command};
 use thiserror::Error;
 
 use crate::engine::{Engine, Request, Response};
-use crate::store::{GetRequest, PutRequest};
+use crate::store::{ContainsRequest, DeleteRequest, GetRequest, PutRequest};
 use crate::tcp;
 
 #[derive(Error, Debug)]
@@ -67,7 +67,7 @@ pub fn run_repl(engine: &Engine) -> Result<(), ReplError> {
             command! {
                 "Delete the entry for <key>",
                 (key: String) => |key: String| {
-                    match engine.process(Request::Get(GetRequest {key: key.as_bytes().to_vec() }))?.recv() {
+                    match engine.process(Request::Delete(DeleteRequest {key: key.as_bytes().to_vec() }))?.recv() {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
@@ -79,7 +79,7 @@ pub fn run_repl(engine: &Engine) -> Result<(), ReplError> {
             command! {
                 "Check if there is an entry for <key>",
                 (key: String) => |key: String| {
-                    match engine.process(Request::Get(GetRequest {key: key.as_bytes().to_vec() }))?.recv() {
+                    match engine.process(Request::Contains(ContainsRequest {key: key.as_bytes().to_vec() }))?.recv() {
                         Ok(Response::Contains(response)) => { println!("contains: {}", response.contains); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                         _ => { println!("Error: incorrect response type."); }
