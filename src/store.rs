@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use clap::error::Result;
 use dashmap::DashMap;
@@ -84,24 +87,49 @@ pub struct Location {
 pub struct Store {
     storage: Storage,
     keydir: DashMap<Vec<u8>, Location>,
+    total_bytes: AtomicU64,
+    dead_bytes: AtomicU64,
 }
 
-impl Store {
-    fn build_keydir(storage: &Storage) -> Result<DashMap<Vec<u8>, Location>, StoreError> {
-        let keydir = DashMap::new();
+type KeyDir = DashMap<Vec<u8>, Location>;
 
-        for (idx, instance) in storage.files.iter() {
+impl Store {
+    fn insert_key(&self, key: Vec<u8>, location: Location) {
+        if self.keydir.contains_key(&key) {
+            let old_location = self.keydir.get(&key).unwrap();
+            self.dead_bytes
+                .fetch_add(old_location.size as u64, Ordering::Relaxed);
+        }
+
+        self.total_bytes
+            .fetch_add(location.size as u64, Ordering::Relaxed);
+        self.keydir.insert(key, location);
+    }
+
+    fn delete_key(&self, key: Vec<u8>, size: u64) {
+        if let Some(old_location) = self.keydir.remove(&key) {
+            self.dead_bytes
+                .fetch_add(old_location.1.size as u64, Ordering::Relaxed);
+        } else {
+            self.dead_bytes.fetch_add(size, Ordering::Relaxed);
+        }
+        self.total_bytes.fetch_add(size, Ordering::Relaxed);
+    }
+
+    fn build_keydir(&self) -> Result<(), StoreError> {
+        for (idx, instance) in self.storage.files.iter() {
             let file_size = instance.len()?;
             let mut offset = 0;
 
             while offset < file_size {
                 let response = instance.read_at(offset)?;
+                let entry_len = StorageInstance::append_len(&response.bytes);
 
                 let entry = rkyv::access::<ArchivedStorageFormat, rancor::Error>(&response.bytes)?;
 
                 match entry {
                     ArchivedStorageFormat::Put { key, .. } => {
-                        keydir.insert(
+                        self.insert_key(
                             key.to_vec(),
                             Location {
                                 file_index: idx as u32,
@@ -111,20 +139,25 @@ impl Store {
                         );
                     }
                     ArchivedStorageFormat::Delete { key } => {
-                        keydir.remove(&key.to_vec());
+                        self.delete_key(key.to_vec(), entry_len);
                     }
                 }
 
-                offset += StorageInstance::append_len(&response.bytes);
+                offset += entry_len;
             }
         }
-
-        Ok(keydir)
+        Ok(())
     }
 
     pub fn initialize(storage: Storage) -> Result<Self, StoreError> {
-        let keydir = Self::build_keydir(&storage)?;
-        Ok(Self { storage, keydir })
+        let store = Self {
+            storage,
+            keydir: KeyDir::new(),
+            total_bytes: AtomicU64::new(0),
+            dead_bytes: AtomicU64::new(0),
+        };
+        store.build_keydir()?;
+        Ok(store)
     }
 
     pub fn put(&self, request: PutRequest) -> Result<PutResponse, StoreError> {
@@ -144,7 +177,7 @@ impl Store {
             offset,
             size: bytes.len() as u32,
         };
-        self.keydir.insert(request.key, location);
+        self.insert_key(request.key, location);
 
         Ok(PutResponse { timestamp })
     }
@@ -177,7 +210,7 @@ impl Store {
 
         let AppendResponse { timestamp, .. } = self.storage.append(&bytes)?;
 
-        self.keydir.remove(&request.key);
+        self.delete_key(request.key, StorageInstance::append_len(&bytes));
 
         Ok(DeleteResponse { timestamp })
     }
