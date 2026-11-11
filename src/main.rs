@@ -18,8 +18,10 @@ use thiserror::Error;
 
 use crate::{
     config::{CommandMode, ConfigError, build_config},
+    engine::Engine,
     repl::run_repl,
     storage::Storage,
+    store::Store,
     tcp::create_listener,
 };
 
@@ -31,6 +33,10 @@ enum Error {
     Repl(#[from] repl::ReplError),
     #[error("{0}")]
     Storage(#[from] storage::StorageError),
+    #[error("{0}")]
+    Store(#[from] store::StoreError),
+    #[error("{0}")]
+    Engine(#[from] engine::EngineError),
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
     #[error("{0}")]
@@ -44,8 +50,9 @@ fn main() -> Result<(), Error> {
     let config = build_config()?;
 
     // Initialize database.
-    let storage = Storage::<File>::initialize(&config.database_path)?;
-    let storage = Arc::new(Mutex::new(storage));
+    let storage = Storage::initialize(config.clone())?;
+    let store = Arc::new(Store::initialize(storage)?);
+    let engine = Engine::new(config.clone(), store);
 
     let quit = Arc::new(AtomicBool::new(false));
     {
@@ -59,20 +66,17 @@ fn main() -> Result<(), Error> {
 
     // Handle requests.
     {
-        let storage = storage.clone();
         match config.command_mode {
             CommandMode::Repl => {
-                let mut storage = storage.lock().unwrap();
-                run_repl(&mut storage).unwrap();
+                run_repl(&engine).unwrap();
             }
             CommandMode::Tcp => {
                 let listener = create_listener(config.socket_address).unwrap();
-                tcp::handle_requests(listener, storage, quit).unwrap();
+                tcp::handle_requests(listener, Arc::new(engine), quit).unwrap();
             }
         };
     }
 
-    storage.lock().unwrap().quit()?;
     println!("\n\nData saved to disk. Exiting...");
 
     Ok(())

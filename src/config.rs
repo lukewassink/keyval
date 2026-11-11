@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     /// Path to the database file.
     pub database_path: String,
@@ -28,7 +28,7 @@ pub struct Config {
     pub max_value_size: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum CommandMode {
     Repl,
     Tcp,

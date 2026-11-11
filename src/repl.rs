@@ -1,12 +1,9 @@
 use easy_repl::{CommandStatus, Repl, command};
-use std::{cell::RefCell, cmp::min, fs::File};
-use storage::Storage;
 use thiserror::Error;
 
-use crate::{
-    storage::{self, ContainsRequest, DeleteRequest, ReadRequest, WriteRequest},
-    tcp,
-};
+use crate::engine::{Engine, Request, Response};
+use crate::store::{GetRequest, PutRequest};
+use crate::tcp;
 
 #[derive(Error, Debug)]
 pub enum ReplError {
@@ -38,16 +35,14 @@ impl From<easy_repl::repl::BuilderError> for ReplError {
     }
 }
 
-pub fn run_repl(storage: &mut Storage<File>) -> Result<(), ReplError> {
-    let storage = &RefCell::new(storage);
-
+pub fn run_repl(engine: &Engine) -> Result<(), ReplError> {
     let mut repl = Repl::builder()
         .add(
             "put",
             command! {
                 "Put the pair (key, val)",
                 (key: String, val: String) => |key: String, val: String| {
-                    match storage.borrow_mut().write(&WriteRequest{key: key.as_bytes(), val: val.as_bytes()}) {
+                    match engine.process(Request::Put(PutRequest {key: key.as_bytes().to_vec(), val: val.as_bytes().to_vec()}))?.recv() {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Put failed with error {:?}", e)}
                     }
@@ -59,9 +54,10 @@ pub fn run_repl(storage: &mut Storage<File>) -> Result<(), ReplError> {
             command! {
                 "Get the value for <key>",
                 (key: String) => |key: String| {
-                    match storage.borrow_mut().read(&ReadRequest{key: key.as_bytes()}) {
-                        Ok(response) => { println!("val: {}", String::from_utf8_lossy(&response.val)); }
+                    match engine.process(Request::Get(GetRequest {key: key.as_bytes().to_vec() }))?.recv() {
+                        Ok(Response::Get(response)) => { println!("val: {}", String::from_utf8_lossy(&response.val)); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
+                        _ => { println!("Error: incorrect response type."); }
                     }
                     Ok(CommandStatus::Done)
             }},
@@ -71,7 +67,7 @@ pub fn run_repl(storage: &mut Storage<File>) -> Result<(), ReplError> {
             command! {
                 "Delete the entry for <key>",
                 (key: String) => |key: String| {
-                    match storage.borrow_mut().delete(&DeleteRequest{key: key.as_bytes()}) {
+                    match engine.process(Request::Get(GetRequest {key: key.as_bytes().to_vec() }))?.recv() {
                         Ok(_) => { println!("Done"); }
                         Err(e) => { println!("Get failed with error {:?}", e)}
                     }
@@ -83,22 +79,22 @@ pub fn run_repl(storage: &mut Storage<File>) -> Result<(), ReplError> {
             command! {
                 "Check if there is an entry for <key>",
                 (key: String) => |key: String| {
-                    let c = storage.borrow_mut().contains(&ContainsRequest{key: key.as_bytes()});
-                    println!("contains: {}", c);
+                    match engine.process(Request::Get(GetRequest {key: key.as_bytes().to_vec() }))?.recv() {
+                        Ok(Response::Contains(response)) => { println!("contains: {}", response.contains); }
+                        Err(e) => { println!("Get failed with error {:?}", e)}
+                        _ => { println!("Error: incorrect response type."); }
+                    }
                     Ok(CommandStatus::Done)
-            }},
+                }},
         )
         .add(
             "keys",
             command! {
                 "Print the first 100 keys",
                 () => || {
-                    let keys = storage.borrow().keys();
-                    let n = min(100, keys.len());
-                    println!("keys: {}\n==========\n{}", keys.len(), keys.iter()
-                        .take(n).map(|k| String::from_utf8_lossy(k).into()).collect::<Vec<String>>().join("\n"));
+                    println!("Not yet implemented.");
                     Ok(CommandStatus::Done)
-            }},
+                }},
         )
         .build()?;
 
