@@ -1,18 +1,14 @@
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-
-use clap::builder::OsStr;
 
 use crate::storage::StorageError;
 
 // Pahther DB magic number: 0PNTH\9e\fa\b4
 const MAGIC_NO: &[u8] = &[0x00, 0x70, 0x6E, 0x74, 0x68, 0x9e, 0xfa, 0xb4];
 const EXTENSION: &str = "data";
-const TMP_EXTENSION: &str = "tmp";
 const FILENAME_ROOT: &str = "pantherdb_data_";
 // Hardcode version to 0 for now.
 // I can allow configuring it later if the storage format evolves.
@@ -87,12 +83,12 @@ fn encode_header(header: &Header) -> Vec<u8> {
 /// 2. the magic number as their first 8 bytes
 ///
 /// Returns them sorted by file_no
-pub fn get_files(path: &str) -> Result<Vec<(u32, File)>, StorageError> {
+pub fn get_files(path: &str) -> Result<BTreeMap<u32, File>, StorageError> {
     if !fs::exists(path)? || !fs::metadata(path)?.is_dir() {
         return Err(StorageError::InvalidDBPath(path.into()));
     }
 
-    let mut num_to_file: BTreeMap<u32, File> = BTreeMap::new();
+    let mut files: BTreeMap<u32, File> = BTreeMap::new();
 
     for file in fs::read_dir(path)? {
         let file = file?;
@@ -117,12 +113,7 @@ pub fn get_files(path: &str) -> Result<Vec<(u32, File)>, StorageError> {
             continue;
         };
 
-        num_to_file.insert(header.file_no, file);
-    }
-
-    let mut files = Vec::new();
-    for file_with_no in num_to_file.into_iter() {
-        files.push(file_with_no);
+        files.insert(header.file_no, file);
     }
 
     Ok(files)

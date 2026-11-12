@@ -1,5 +1,6 @@
 mod config;
 mod engine;
+mod file_utils;
 mod repl;
 mod storage;
 mod store;

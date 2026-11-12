@@ -79,7 +79,7 @@ enum StorageFormat {
 
 #[derive(Debug, Clone)]
 pub struct Location {
-    file_index: u32,
+    file_no: u32,
     offset: u64,
     size: u32,
 }
@@ -117,7 +117,11 @@ impl Store {
     }
 
     fn build_keydir(&self) -> Result<(), StoreError> {
-        for (idx, instance) in self.storage.files.iter() {
+        let guard = self.storage.files.guard();
+        let mut files: Vec<(&u32, &StorageInstance)> = self.storage.files.iter(&guard).collect();
+        files.sort_by_key(|(k, _v)| *k);
+
+        for (file_no, instance) in files {
             let file_size = instance.len()?;
             let mut offset = 0;
 
@@ -132,7 +136,7 @@ impl Store {
                         self.insert_key(
                             key.to_vec(),
                             Location {
-                                file_index: idx as u32,
+                                file_no: *file_no,
                                 offset,
                                 size: response.bytes.len() as u32,
                             },
@@ -167,13 +171,13 @@ impl Store {
         })?;
 
         let AppendResponse {
-            file_index,
+            file_no: file_index,
             offset,
             timestamp,
         } = self.storage.append(&bytes)?;
 
         let location = Location {
-            file_index,
+            file_no: file_index,
             offset,
             size: bytes.len() as u32,
         };
@@ -189,7 +193,7 @@ impl Store {
 
         let response =
             self.storage
-                .read(location.file_index, location.offset, location.size as u64)?;
+                .read(location.file_no, location.offset, location.size as u64)?;
 
         let ArchivedStorageFormat::Put { val, .. } =
             rkyv::access::<ArchivedStorageFormat, rancor::Error>(&response.bytes)?
@@ -387,7 +391,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        assert!(store.storage.files.count() > 1);
+        assert!(store.storage.files.pin().keys().count() > 1);
         drop(store);
 
         let reopened = open_store(&database, 128);

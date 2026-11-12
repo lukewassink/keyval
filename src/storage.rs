@@ -1,37 +1,37 @@
-use clap::error::Result;
-use regex::regex;
-use std::collections::BTreeMap;
-use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{fs::File, os::unix::fs::FileExt, time::SystemTime};
 use thiserror::Error;
 
 use crate::config::Config;
+use crate::file_utils::{self, create_data_file, get_files};
 use crate::storage::StorageError::{
-    Corupted, FileCapacityExceeded, InvalidDBPath, InvalidIndex, StorageCapacityExceeded,
+    Corupted, FileCapacityExceeded, InvalidDBPath, InvalidFileNumber, StorageCapacityExceeded,
 };
 
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("IO error: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Checksum for file {0} at offset {1} with length {2} is not valid.")]
-    Corupted(String, u64, u64),
-    #[error("File {0} with capacity {1}MB would be overfilled by write of {2} bytes.")]
-    FileCapacityExceeded(String, u64, usize),
+    #[error("Checksum for file number {0} at offset {1} with length {2} is not valid.")]
+    Corupted(u32, u64, u64),
+    #[error("File number {0} with capacity {1}MB would be overfilled by write of {2} bytes.")]
+    FileCapacityExceeded(u32, u64, usize),
     #[error("Database capacity of {0} would be exceeded by write of size {1}.")]
     StorageCapacityExceeded(u64, u64),
     #[error("The item at the path {0} is not a directory.")]
     InvalidDBPath(String),
-    #[error("The index {0} does not correspond to any database file.")]
-    InvalidIndex(u32),
+    #[error("The file number {0} does not correspond to any database file.")]
+    InvalidFileNumber(u32),
 }
 
+#[derive(Debug)]
 pub struct StorageInstance {
+    // Use Rc so StorageInstance can be cloned.
     file: File,
 
-    filename: String,
+    file_no: u32,
 
     capacity: u64,
 
@@ -45,7 +45,7 @@ pub struct ReadResponse {
 }
 
 pub struct AppendResponse {
-    pub file_index: u32,
+    pub file_no: u32,
     pub offset: u64,
     pub timestamp: u64,
 }
@@ -60,11 +60,11 @@ impl StorageInstance {
             .as_nanos() as u64
     }
 
-    fn new(file: File, filename: String, config: &Config) -> Result<Self, StorageError> {
+    fn new(file: File, file_no: u32, config: &Config) -> Result<Self, StorageError> {
         let next_offset = Mutex::new(file.metadata()?.len());
         Ok(StorageInstance {
             file,
-            filename,
+            file_no,
             capacity: config.file_size,
             next_offset,
         })
@@ -81,7 +81,7 @@ impl StorageInstance {
     fn append(&self, bytes: &[u8]) -> Result<(u64, u64), StorageError> {
         if self.would_exceed_capacity(bytes) {
             return Err(FileCapacityExceeded(
-                self.filename.clone(),
+                self.file_no,
                 self.capacity,
                 bytes.len(),
             ));
@@ -113,27 +113,17 @@ impl StorageInstance {
         Ok(())
     }
 
-    fn parse_u32(bytes: &[u8], offset: u64) -> u32 {
-        let offset = offset as usize;
-        u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap())
-    }
-
-    fn parse_u64(bytes: &[u8], offset: u64) -> u64 {
-        let offset = offset as usize;
-        u64::from_be_bytes(bytes[offset..offset + 8].try_into().unwrap())
-    }
-
     fn read(&self, offset: u64, size: u64) -> Result<ReadResponse, StorageError> {
         let mut buffer: Vec<u8> = vec![0; (size + Self::HEADER_SIZE) as usize];
 
         self.file.read_exact_at(&mut buffer, offset)?;
 
-        let checksum = Self::parse_u32(&buffer, 0);
+        let checksum = file_utils::parse_u32(&buffer, 0);
         if checksum != crc32fast::hash(&buffer[Self::HEADER_SIZE as usize..]) {
-            return Err(Corupted(self.filename.clone(), offset, size));
+            return Err(Corupted(self.file_no, offset, size));
         }
 
-        let timestamp = Self::parse_u64(&buffer, 4);
+        let timestamp = file_utils::parse_u64(&buffer, 4);
 
         Ok(ReadResponse {
             bytes: buffer[Self::HEADER_SIZE as usize..].into(),
@@ -146,17 +136,17 @@ impl StorageInstance {
         let mut header: Vec<u8> = vec![0; Self::HEADER_SIZE as usize];
         self.file.read_exact_at(&mut header, offset)?;
 
-        let size = Self::parse_u32(&header, 12);
+        let size = file_utils::parse_u32(&header, 12);
         let mut bytes: Vec<u8> = vec![0; size as usize];
         self.file
             .read_exact_at(&mut bytes, offset + Self::HEADER_SIZE)?;
 
-        let checksum = Self::parse_u32(&header, 0);
+        let checksum = file_utils::parse_u32(&header, 0);
         if checksum != crc32fast::hash(&bytes) {
-            return Err(Corupted(self.filename.clone(), offset, size as u64));
+            return Err(Corupted(self.file_no, offset, size as u64));
         }
 
-        let timestamp = Self::parse_u64(&header, 4);
+        let timestamp = file_utils::parse_u64(&header, 4);
 
         Ok(ReadResponse { bytes, timestamp })
     }
@@ -171,45 +161,13 @@ impl StorageInstance {
 }
 
 pub struct Storage {
-    pub files: boxcar::Vec<StorageInstance>,
+    pub files: papaya::HashMap<u32, StorageInstance>,
     config: Config,
     size: Mutex<u64>,
-    max_bytes: u64,
+    active_file_no: AtomicU32,
 }
 
 impl Storage {
-    const ROOT_FILE_NAME: &str = "db_file_";
-    const INITIAL_FILE_NAME: &str = "db_file_00000";
-
-    // Assumes file names of the form: db_file_00000, db_file_00001, etc.
-    // Returns None if the filename does not match that pattern.
-    fn extract_file_number(filename: OsString) -> Option<(String, u32)> {
-        let Ok(filename) = filename.into_string() else {
-            return None;
-        };
-
-        let caps = regex!(r"^db_file_(?<number>\d{5})$").captures(&filename)?;
-
-        Some((
-            caps.get_match().as_str().into(),
-            caps.name("number").unwrap().as_str().parse().unwrap(),
-        ))
-    }
-
-    fn open_file(path: &str, create: bool) -> Result<File, StorageError> {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(create)
-            .truncate(false)
-            .open(path)
-            .map_err(Into::into)
-    }
-
-    fn head_file(&self) -> Option<&StorageInstance> {
-        self.files.get(self.files.count() - 1)
-    }
-
     pub fn initialize(config: Config) -> Result<Self, StorageError> {
         let path = &config.database_path;
         if !fs::exists(path)? {
@@ -220,95 +178,80 @@ impl Storage {
             return Err(InvalidDBPath(path.into()));
         }
 
-        // Read existing files.
-        let mut size: u64 = 0;
-        let mut num_to_file: BTreeMap<u32, StorageInstance> = BTreeMap::new();
-        for file in fs::read_dir(path)? {
-            let file = file?;
-
-            if !file.metadata()?.is_file() {
-                continue;
-            }
-
-            if let Some((filename, num)) = Self::extract_file_number(file.file_name()) {
-                let file = Self::open_file(file.path().to_str().unwrap(), false)?;
-
-                size += file.metadata().unwrap().len();
-                num_to_file.insert(num, StorageInstance::new(file, filename, &config)?);
-            }
+        let mut files = get_files(path)?;
+        if files.is_empty() {
+            files.insert(0, create_data_file(path, 0)?);
         }
 
-        // If no database files exist, create the initial file.
-        if num_to_file.is_empty() {
-            let file = Self::open_file(Self::INITIAL_FILE_NAME, true)?;
-            num_to_file.insert(
-                0,
-                StorageInstance::new(file, Self::INITIAL_FILE_NAME.into(), &config)?,
-            );
-        }
-
-        let files = boxcar::Vec::with_capacity(1000);
-        for file in num_to_file.into_values() {
-            files.push(file);
-        }
-
-        let max_bytes = config.max_db_size;
+        let size = files.values().map(|f| f.metadata().unwrap().len()).sum();
+        let files: papaya::HashMap<u32, StorageInstance> = files
+            .into_iter()
+            .map(|(id, file)| (id, StorageInstance::new(file, id, &config).unwrap()))
+            .collect();
+        let active_file_no = AtomicU32::new(*files.pin().keys().max().unwrap());
 
         Ok(Storage {
             config,
             files,
-            max_bytes,
             size: Mutex::new(size),
+            active_file_no,
         })
     }
 
     pub fn append(&self, bytes: &[u8]) -> Result<AppendResponse, StorageError> {
-        // Chec if max db size would be exceeded.
+        // Check if max db size would be exceeded.
         let mut size = self.size.lock().unwrap();
-        if StorageInstance::append_len(bytes) + *size > self.max_bytes {
-            return Err(StorageCapacityExceeded(self.max_bytes, bytes.len() as u64));
+        if StorageInstance::append_len(bytes) + *size > self.config.max_db_size {
+            return Err(StorageCapacityExceeded(
+                self.config.max_db_size,
+                bytes.len() as u64,
+            ));
         }
 
-        // Create a new file if current head file would overflow.
-        if self.head_file().unwrap().would_exceed_capacity(bytes) {
-            let head = self.head_file().unwrap();
-            head.flush()?;
-            head.set_read_only()?;
+        // Get active instance.
+        let files = self.files.pin();
+        let mut active_instance = files
+            .get(&self.active_file_no.load(Ordering::Relaxed))
+            .unwrap();
+        let mut updated = false;
 
-            let next_file_name = format!("{}{:05}", Self::ROOT_FILE_NAME, self.files.count());
-            let next_file_path = format!("{}{}", self.config.database_path, next_file_name);
-            let next_file = Self::open_file(&next_file_path, true)?;
-            self.files.push(StorageInstance::new(
-                next_file,
-                next_file_name,
-                &self.config,
-            )?);
+        // Create a new instance if it would overflow.
+        if active_instance.would_exceed_capacity(bytes) {
+            updated = true;
+            active_instance.flush()?;
+            active_instance.set_read_only()?;
+
+            let file_no = self.active_file_no.fetch_add(1, Ordering::Relaxed) + 1;
+            let new_active_file = create_data_file(&self.config.database_path, file_no)?;
+
+            self.files.pin().insert(
+                file_no,
+                StorageInstance::new(new_active_file, file_no, &self.config)?,
+            );
+        }
+
+        if updated {
+            active_instance = files
+                .get(&self.active_file_no.load(Ordering::Relaxed))
+                .unwrap();
         }
 
         // Write the bytes.
-        let (offset, timestamp) = self.head_file().unwrap().append(bytes)?;
+        let (offset, timestamp) = active_instance.append(bytes)?;
         *size += StorageInstance::append_len(bytes);
         Ok(AppendResponse {
-            file_index: self.files.count() as u32 - 1,
+            file_no: active_instance.file_no,
             offset,
             timestamp,
         })
     }
 
-    pub fn read(
-        &self,
-        file_index: u32,
-        offset: u64,
-        size: u64,
-    ) -> Result<ReadResponse, StorageError> {
-        if file_index > self.files.count() as u32 {
-            return Err(InvalidIndex(file_index));
+    pub fn read(&self, file_no: u32, offset: u64, size: u64) -> Result<ReadResponse, StorageError> {
+        if !self.files.pin().contains_key(&file_no) {
+            return Err(InvalidFileNumber(file_no));
         }
 
-        self.files
-            .get(file_index as usize)
-            .unwrap()
-            .read(offset, size)
+        self.files.pin().get(&file_no).unwrap().read(offset, size)
     }
 }
 
@@ -392,10 +335,12 @@ pub(crate) mod tests {
             max_value_size: 1024,
         };
 
+        assert_eq!(fs::read_dir(".").iter().count(), 0);
+
         let storage = Storage::initialize(config).unwrap();
 
-        assert_eq!(storage.files.count(), 1);
-        assert!(Path::new(Storage::INITIAL_FILE_NAME).is_file());
+        assert_eq!(storage.files.pin().keys().count(), 1);
+        assert_eq!(fs::read_dir(".").iter().count(), 1);
     }
 
     #[test]
@@ -407,20 +352,20 @@ pub(crate) mod tests {
 
         let storage = Storage::initialize(config(temp_dir.path(), 1, 4)).unwrap();
 
-        assert_eq!(storage.files.count(), 2);
+        assert_eq!(storage.files.pin().keys().count(), 2);
     }
 
     #[test]
     fn reads_and_writes_valid_data() {
         let temp_dir = TempDir::new();
-        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
         let storage = Storage::initialize(config(temp_dir.path(), 1024, 2048)).unwrap();
         let payload = b"append-only value";
 
         let append1 = storage.append(payload).unwrap();
         let read1 = storage.read(0, 0, payload.len() as u64).unwrap();
         let AppendResponse {
-            file_index,
+            file_no: file_index,
             offset,
             timestamp,
         } = storage.append(payload).unwrap();
@@ -430,7 +375,7 @@ pub(crate) mod tests {
 
         assert_eq!(read1.bytes, payload);
         assert_eq!(read1.timestamp, append1.timestamp);
-        assert_eq!(append1.file_index, 0);
+        assert_eq!(append1.file_no, 0);
         assert_eq!(append1.offset, 0);
         assert_eq!(read2.bytes, payload);
         assert_eq!(read2.timestamp, timestamp);
@@ -439,13 +384,11 @@ pub(crate) mod tests {
     #[test]
     fn rejects_a_record_with_an_invalid_checksum() {
         let temp_dir = TempDir::new();
-        let file_path = temp_dir.path().join(Storage::INITIAL_FILE_NAME);
-        File::create(&file_path).unwrap();
+        let mut file = create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
         let storage = Storage::initialize(config(temp_dir.path(), ONE_MB, 2 * ONE_MB)).unwrap();
         let payload = b"checksum-protected";
         storage.append(payload).unwrap();
 
-        let mut file = OpenOptions::new().write(true).open(file_path).unwrap();
         file.seek(SeekFrom::Start(StorageInstance::HEADER_SIZE))
             .unwrap();
         file.write_all(&[payload[0] ^ 0xff]).unwrap();
@@ -460,20 +403,20 @@ pub(crate) mod tests {
     #[test]
     fn rolls_over_when_the_head_file_cannot_fit_a_record() {
         let temp_dir = TempDir::new();
-        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
         let storage = Storage::initialize(config(temp_dir.path(), 30, 200)).unwrap();
         storage.append(b"first").unwrap();
 
         storage.append(b"more").unwrap();
 
-        assert_eq!(storage.files.count(), 2);
+        assert_eq!(storage.files.pin().keys().count(), 2);
         assert!(temp_dir.path().join("db_file_00001").is_file());
     }
 
     #[test]
     fn concurrent_appends_and_reads_do_not_corrupt_records() {
         let temp_dir = TempDir::new();
-        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
         let storage =
             Arc::new(Storage::initialize(config(temp_dir.path(), 2 << 20, 2 << 20)).unwrap());
         let initial = b"stable";
@@ -530,7 +473,7 @@ pub(crate) mod tests {
     #[test]
     fn concurrent_appends_and_reads_add_new_files_correctly() {
         let temp_dir = TempDir::new();
-        File::create(temp_dir.path().join(Storage::INITIAL_FILE_NAME)).unwrap();
+        create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
         let storage = Arc::new(Storage::initialize(config(temp_dir.path(), 128, 2 << 20)).unwrap());
         let initial = b"stable";
         storage.append(initial).unwrap();
@@ -557,7 +500,9 @@ pub(crate) mod tests {
 
                     for payload in &payloads {
                         let AppendResponse {
-                            file_index, offset, ..
+                            file_no: file_index,
+                            offset,
+                            ..
                         } = storage.append(payload).unwrap();
                         let read = storage
                             .read(file_index, offset, PAYLOAD_SIZE as u64)
@@ -572,6 +517,6 @@ pub(crate) mod tests {
             worker.join().unwrap();
         }
 
-        println!("Files: {}", storage.files.count());
+        println!("Files: {}", storage.files.pin().keys().count());
     }
 }
