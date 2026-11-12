@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
+
+use clap::builder::OsStr;
 
 use crate::storage::StorageError;
 
@@ -10,10 +13,10 @@ use crate::storage::StorageError;
 const MAGIC_NO: &[u8] = &[0x00, 0x70, 0x6E, 0x74, 0x68, 0x9e, 0xfa, 0xb4];
 const EXTENSION: &str = "data";
 const TMP_EXTENSION: &str = "tmp";
-const FILENAME_ROOT: &str = "patherdb_data_";
+const FILENAME_ROOT: &str = "pantherdb_data_";
 // Hardcode version to 0 for now.
 // I can allow configuring it later if the storage format evolves.
-const VERSTION: u32 = 0;
+const VERSION: u32 = 0;
 const HEADER_LENGTH: usize = 16;
 
 fn open_file(path: &str, create: bool) -> Result<File, StorageError> {
@@ -84,7 +87,7 @@ fn encode_header(header: &Header) -> Vec<u8> {
 /// 2. the magic number as their first 8 bytes
 ///
 /// Returns them sorted by file_no
-pub fn get_files(path: &str) -> Result<Vec<File>, StorageError> {
+pub fn get_files(path: &str) -> Result<Vec<(u32, File)>, StorageError> {
     if !fs::exists(path)? || !fs::metadata(path)?.is_dir() {
         return Err(StorageError::InvalidDBPath(path.into()));
     }
@@ -103,11 +106,13 @@ pub fn get_files(path: &str) -> Result<Vec<File>, StorageError> {
             continue;
         };
 
-        if !file_name.ends_with(EXTENSION) {
+        if file.path().extension().and_then(|s| s.to_str()) != Some(EXTENSION) {
             continue;
         }
 
-        let file = open_file(file_name, false)?;
+        let mut file_path = PathBuf::from(path);
+        file_path.push(file_name);
+        let file = open_file(file_path.to_str().unwrap(), false)?;
         let Some(header) = parse_header(&file)? else {
             continue;
         };
@@ -115,9 +120,9 @@ pub fn get_files(path: &str) -> Result<Vec<File>, StorageError> {
         num_to_file.insert(header.file_no, file);
     }
 
-    let mut files: Vec<File> = Vec::new();
-    for file in num_to_file.into_values() {
-        files.push(file);
+    let mut files = Vec::new();
+    for file_with_no in num_to_file.into_iter() {
+        files.push(file_with_no);
     }
 
     Ok(files)
@@ -134,7 +139,7 @@ pub fn create_data_file(directory_path: &str, file_no: u32) -> Result<File, Stor
     file.write_all_at(
         &encode_header(&Header {
             file_no,
-            format_version: VERSTION,
+            format_version: VERSION,
         }),
         0,
     )?;
