@@ -143,3 +143,111 @@ pub fn create_data_file(directory_path: &str, file_no: u32) -> Result<File, Stor
 
     Ok(file)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("keyval-file-utils-{}-{id}", std::process::id()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    fn write_file(path: &Path, contents: &[u8]) {
+        fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn parses_big_endian_integers_at_offsets() {
+        let bytes = [0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+
+        assert_eq!(parse_u32(&bytes, 1), 0x0102_0304);
+        assert_eq!(parse_u64(&bytes, 1), 0x0102_0304_0506_0708);
+    }
+
+    #[test]
+    fn formats_file_names_and_paths() {
+        assert_eq!(file_name(0), "pantherdb_data_00000.data");
+        assert_eq!(file_name(42), "pantherdb_data_00042.data");
+        assert_eq!(file_name(u32::MAX), "pantherdb_data_4294967295.data");
+        assert_eq!(
+            file_path(7, "/database"),
+            "/database/pantherdb_data_00007.data"
+        );
+    }
+
+    #[test]
+    fn creates_a_header_for_the_requested_file_number() {
+        let temp_dir = TempDir::new();
+        let file = create_data_file(temp_dir.path().to_str().unwrap(), 37).unwrap();
+
+        let header = parse_header(&file).unwrap().unwrap();
+        assert_eq!(header.format_version, VERSION);
+        assert_eq!(header.file_no, 37);
+    }
+
+    #[test]
+    fn get_files_returns_only_regular_data_files_with_the_magic_header() {
+        let temp_dir = TempDir::new();
+        let path = temp_dir.path();
+
+        create_data_file(path.to_str().unwrap(), 10).unwrap();
+        create_data_file(path.to_str().unwrap(), 2).unwrap();
+        write_file(
+            &path.join("wrong-extension.txt"),
+            &encode_header(&Header {
+                format_version: VERSION,
+                file_no: 20,
+            }),
+        );
+        let mut bad_magic = encode_header(&Header {
+            format_version: VERSION,
+            file_no: 30,
+        });
+        bad_magic[0] ^= 0xff;
+        write_file(&path.join("bad-magic.data"), &bad_magic);
+        write_file(&path.join("truncated.data"), &MAGIC_NO[..7]);
+        fs::create_dir(path.join("directory.data")).unwrap();
+
+        let files = get_files(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(files.keys().copied().collect::<Vec<_>>(), [2, 10]);
+    }
+
+    #[test]
+    fn get_files_rejects_missing_paths_and_non_directories() {
+        let temp_dir = TempDir::new();
+        let file_path = temp_dir.path().join("not-a-directory");
+        write_file(&file_path, b"");
+
+        assert!(matches!(
+            get_files(temp_dir.path().join("missing").to_str().unwrap()),
+            Err(StorageError::InvalidDBPath(_))
+        ));
+        assert!(matches!(
+            get_files(file_path.to_str().unwrap()),
+            Err(StorageError::InvalidDBPath(_))
+        ));
+    }
+}
