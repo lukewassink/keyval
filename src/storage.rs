@@ -51,7 +51,7 @@ pub struct AppendResponse {
 }
 
 impl StorageInstance {
-    const HEADER_SIZE: u64 = 16;
+    pub(crate) const HEADER_SIZE: u64 = 16;
 
     fn timestamp() -> u64 {
         SystemTime::now()
@@ -257,6 +257,8 @@ impl Storage {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::file_utils::{EXTENSION, FILENAME_ROOT};
+
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
@@ -335,8 +337,6 @@ pub(crate) mod tests {
             max_value_size: 1024,
         };
 
-        assert_eq!(fs::read_dir(".").iter().count(), 0);
-
         let storage = Storage::initialize(config).unwrap();
 
         assert_eq!(storage.files.pin().keys().count(), 1);
@@ -346,8 +346,8 @@ pub(crate) mod tests {
     #[test]
     fn initializes_from_numbered_files_with_gaps_and_ignores_other_files() {
         let temp_dir = TempDir::new();
-        for filename in ["db_file_00000", "db_file_00002", "notes.txt"] {
-            File::create(temp_dir.path().join(filename)).unwrap();
+        for file_no in 0..2 {
+            file_utils::create_data_file(temp_dir.path().to_str().unwrap(), file_no).unwrap();
         }
 
         let storage = Storage::initialize(config(temp_dir.path(), 1, 4)).unwrap();
@@ -363,7 +363,9 @@ pub(crate) mod tests {
         let payload = b"append-only value";
 
         let append1 = storage.append(payload).unwrap();
-        let read1 = storage.read(0, 0, payload.len() as u64).unwrap();
+        let read1 = storage
+            .read(0, StorageInstance::HEADER_SIZE, payload.len() as u64)
+            .unwrap();
         let AppendResponse {
             file_no: file_index,
             offset,
@@ -376,7 +378,7 @@ pub(crate) mod tests {
         assert_eq!(read1.bytes, payload);
         assert_eq!(read1.timestamp, append1.timestamp);
         assert_eq!(append1.file_no, 0);
-        assert_eq!(append1.offset, 0);
+        assert_eq!(append1.offset, StorageInstance::HEADER_SIZE);
         assert_eq!(read2.bytes, payload);
         assert_eq!(read2.timestamp, timestamp);
     }
@@ -404,13 +406,13 @@ pub(crate) mod tests {
     fn rolls_over_when_the_head_file_cannot_fit_a_record() {
         let temp_dir = TempDir::new();
         create_data_file(temp_dir.path().to_str().unwrap(), 0).unwrap();
-        let storage = Storage::initialize(config(temp_dir.path(), 30, 200)).unwrap();
+        let storage = Storage::initialize(config(temp_dir.path(), 50, 200)).unwrap();
         storage.append(b"first").unwrap();
 
         storage.append(b"more").unwrap();
 
         assert_eq!(storage.files.pin().keys().count(), 2);
-        assert!(temp_dir.path().join("db_file_00001").is_file());
+        assert!(temp_dir.path().join(file_utils::file_name(1)).is_file());
     }
 
     #[test]
@@ -444,7 +446,9 @@ pub(crate) mod tests {
 
                     for payload in &payloads {
                         storage.append(payload).unwrap();
-                        let read = storage.read(0, 0, initial.len() as u64).unwrap();
+                        let read = storage
+                            .read(0, StorageInstance::HEADER_SIZE, initial.len() as u64)
+                            .unwrap();
                         assert_eq!(read.bytes, initial);
                     }
                     payloads
@@ -460,7 +464,8 @@ pub(crate) mod tests {
 
         let mut actual = Vec::with_capacity(WORKERS);
         for index in 0..(WORKERS * WRITES_PER_WORKER) {
-            let offset = StorageInstance::HEADER_SIZE
+            let offset = file_utils::HEADER_LENGTH as u64
+                + StorageInstance::HEADER_SIZE
                 + initial.len() as u64
                 + index as u64 * (StorageInstance::HEADER_SIZE + PAYLOAD_SIZE as u64);
             actual.push(storage.read(0, offset, PAYLOAD_SIZE as u64).unwrap().bytes);

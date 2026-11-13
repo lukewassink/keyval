@@ -8,12 +8,12 @@ use crate::storage::StorageError;
 
 // Pahther DB magic number: 0PNTH\9e\fa\b4
 const MAGIC_NO: &[u8] = &[0x00, 0x70, 0x6E, 0x74, 0x68, 0x9e, 0xfa, 0xb4];
-const EXTENSION: &str = "data";
-const FILENAME_ROOT: &str = "pantherdb_data_";
+pub(crate) const EXTENSION: &str = "data";
+pub(crate) const FILENAME_ROOT: &str = "pantherdb_data_";
 // Hardcode version to 0 for now.
 // I can allow configuring it later if the storage format evolves.
 const VERSION: u32 = 0;
-const HEADER_LENGTH: usize = 16;
+pub(crate) const HEADER_LENGTH: usize = 16;
 
 fn open_file(path: &str, create: bool) -> Result<File, StorageError> {
     OpenOptions::new()
@@ -119,12 +119,18 @@ pub fn get_files(path: &str) -> Result<BTreeMap<u32, File>, StorageError> {
     Ok(files)
 }
 
-pub fn create_data_file(directory_path: &str, file_no: u32) -> Result<File, StorageError> {
-    let file_name = format!("{}{:05}.{}", FILENAME_ROOT, file_no, EXTENSION);
-    let mut file_path = PathBuf::from(directory_path);
-    file_path.push(file_name);
+pub fn file_name(file_no: u32) -> String {
+    format!("{}{:05}.{}", FILENAME_ROOT, file_no, EXTENSION)
+}
 
-    let file = open_file(file_path.to_str().unwrap(), true)?;
+pub fn file_path(file_no: u32, directory_path: &str) -> String {
+    let mut file_path = PathBuf::from(directory_path);
+    file_path.push(file_name(file_no));
+    file_path.to_str().unwrap().to_string()
+}
+
+pub fn create_data_file(directory_path: &str, file_no: u32) -> Result<File, StorageError> {
+    let file = open_file(&file_path(file_no, directory_path), true)?;
 
     // Set the file header.
     file.write_all_at(

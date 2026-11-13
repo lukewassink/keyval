@@ -123,7 +123,7 @@ impl Store {
 
         for (file_no, instance) in files {
             let file_size = instance.len()?;
-            let mut offset = 0;
+            let mut offset = StorageInstance::HEADER_SIZE;
 
             while offset < file_size {
                 let response = instance.read_at(offset)?;
